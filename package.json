@@ -1,10 +1,10 @@
 {
   "name": "eth-trading-monitor",
-  "version": "1.0.0",
-  "description": "ETH 24/7 signal monitor",
-  "main": "server.js",
+  "version": "2.0.0",
+  "description": "ETH AI Auto Trader",
+  "main": "trader.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node trader.js"
   },
   "engines": {
     "node": ">=16"
