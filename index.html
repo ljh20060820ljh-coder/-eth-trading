@@ -899,7 +899,15 @@ function checkAlerts() {
 
 function saveHistory(sig, price) {
   currentHistoryId = Date.now();
-  signalHistory.unshift({id:currentHistoryId, type:sig.type, label:sig.label, price:price, time:new Date().toLocaleString('zh-CN'), result:'open', exitPrice:null, interval:currentInterval});
+  signalHistory.unshift({id:currentHistoryId, type:sig.type, label:sig.label, price:price, time:new Date().toLocaleString('zh-CN'), result:'open', exitPrice:null, interval:currentInterval, aiAnalysis:null});
+  try { localStorage.setItem('eth_signal_history', JSON.stringify(signalHistory.slice(0,50))); } catch(e) {}
+  renderHistory();
+}
+
+function saveAIToHistory(text) {
+  if(!currentHistoryId) return;
+  var item = signalHistory.find(function(h){ return h.id === currentHistoryId; });
+  if(item) { item.aiAnalysis = text; }
   try { localStorage.setItem('eth_signal_history', JSON.stringify(signalHistory.slice(0,50))); } catch(e) {}
   renderHistory();
 }
@@ -910,6 +918,12 @@ function updateHistoryResult(result, exitPrice) {
   if(item) { item.result = result; item.exitPrice = exitPrice; }
   try { localStorage.setItem('eth_signal_history', JSON.stringify(signalHistory.slice(0,50))); } catch(e) {}
   renderHistory();
+}
+
+function toggleAI(id) {
+  var el = document.getElementById('ai-detail-'+id);
+  if(!el) return;
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
 function loadHistory() {
@@ -926,7 +940,9 @@ function renderHistory() {
   document.getElementById('accuracyDetail').textContent = '共'+signalHistory.length+'次信号 · '+wins+'次盈利 · '+(closed-wins)+'次亏损 · '+signalHistory.filter(function(h){return h.result==='open';}).length+'个持仓中';
   if(!signalHistory.length) { document.getElementById('historyList').innerHTML = '<div style="color:var(--dim);font-size:12px;text-align:center;padding:20px;">暂无历史信号，等待第一个信号...</div>'; return; }
   document.getElementById('historyList').innerHTML = signalHistory.slice(0,20).map(function(h){
-    return '<div class="history-item"><span class="hist-dir '+(h.type==='LONG'?'long':'short')+'">'+(h.type==='LONG'?'做多':'做空')+'</span><span style="font-size:11px">'+h.interval+'</span><span style="font-family:Orbitron,monospace;font-size:12px">'+h.price.toFixed(2)+'</span>'+(h.exitPrice?'<span style="font-size:11px;color:var(--dim)">→ '+h.exitPrice.toFixed(2)+'</span>':'')+'<span style="font-size:10px;color:var(--dim)">'+h.time+'</span><span class="hist-result '+(h.result)+'">'+(h.result==='win'?'盈利':h.result==='loss'?'亏损':'持仓中')+'</span></div>';
+    var aiBtn = h.aiAnalysis ? '<button onclick="toggleAI('+h.id+')" style="background:rgba(167,139,250,0.15);border:1px solid rgba(167,139,250,0.3);border-radius:4px;color:#a78bfa;font-size:10px;padding:2px 8px;cursor:pointer;margin-left:4px;">AI分析</button>' : '';
+    var aiDetail = h.aiAnalysis ? '<div id="ai-detail-'+h.id+'" style="display:none;margin-top:8px;padding:10px;background:rgba(167,139,250,0.07);border-radius:6px;font-size:11px;color:var(--text);line-height:1.8;border:1px solid rgba(167,139,250,0.2);">'+h.aiAnalysis.split('\n').join('<br>')+'</div>' : '';
+    return '<div class="history-item" style="flex-direction:column;align-items:flex-start;"><div style="display:flex;align-items:center;gap:8px;width:100%;flex-wrap:wrap;"><span class="hist-dir '+(h.type==='LONG'?'long':'short')+'">'+(h.type==='LONG'?'做多':'做空')+'</span><span style="font-size:11px">'+h.interval+'</span><span style="font-family:Orbitron,monospace;font-size:12px">'+h.price.toFixed(2)+'</span>'+(h.exitPrice?'<span style="font-size:11px;color:var(--dim)">→ '+h.exitPrice.toFixed(2)+'</span>':'')+'<span style="font-size:10px;color:var(--dim)">'+h.time+'</span>'+aiBtn+'<span class="hist-result '+(h.result)+'" style="margin-left:auto;">'+(h.result==='win'?'盈利':h.result==='loss'?'亏损':'持仓中')+'</span></div>'+aiDetail+'</div>';
   }).join('');
 }
 
@@ -1053,6 +1069,7 @@ async function requestAIAnalysis() {
       text = text.replace(/(做空|看空|卖出|空头)/g, '<span class="ai-bear">$1</span>');
       text = text.replace(/(观望|中性|谨慎)/g, '<span class="ai-neutral">$1</span>');
       content.innerHTML = '<div class="ai-content">' + text.replace(/\n/g, '<br>') + '</div>';
+      saveAIToHistory(text);
     } else {
       content.innerHTML = '<div style="color:var(--red);font-size:12px;">分析失败：' + (result.error ? result.error.message : '未知错误') + '</div>';
     }
@@ -1073,7 +1090,7 @@ loadNews();
 generateWhales();
 
 setInterval(function(){ INTERVALS.forEach(function(iv){ fetchCandles(iv); }); }, 10000);
-setInterval(fetchTicker, 3000);
+setInterval(fetchTicker, 1000);
 setInterval(fetchBTCCandles, 60000);
 setInterval(fetchFearGreed, 300000);
 setInterval(fetchDominance, 300000);
