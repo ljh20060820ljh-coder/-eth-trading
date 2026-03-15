@@ -7,10 +7,13 @@ const EMAILJS_PUBLIC_KEY = "8hV-qEj_65-Yjk1Pn";
 const DEEPSEEK_API_KEY = "sk-807bdf2c1e164c818519243bacb72a72";
 const NOTIFY_EMAIL = "2183089849@qq.com";
 const SYMBOL = "ETHUSDT";
-const CHECK_INTERVAL_MS = 60 * 1000;
-const SIGNAL_COOLDOWN_MS = 15 * 60 * 1000;
+const CHECK_INTERVAL_MS = 10 * 1000; // 10 seconds
+const SIGNAL_COOLDOWN_MS = 15 * 60 * 1000; // 15 min for new signals
+const HOLD_REMINDER_MS = 5 * 60 * 1000; // 5 min hold reminder
 
 let monitorEnabled = true;
+let lastHoldReminderTime = 0;
+let holdReminderSent = false;
 let lastSignalTime = 0;
 let lastSignalType = null;
 let lastPrice = null;
@@ -170,27 +173,74 @@ async function sendEmail(sig, tpsl, aiText) {
   } catch(e) { console.log("Email error:", e.message); return false; }
 }
 
+async function sendHoldEmail(sig, price) {
+  const time = new Date().toLocaleString('zh-CN', {timeZone:'Asia/Shanghai'});
+  const msg = `【趋势持续提醒】${sig.label}方向持续中
+【当前价格】${price.toFixed(2)}
+【建议】趋势未变，继续持仓，不要轻易平仓
+【时间】${time}`;
+  try {
+    await postJSON("https://api.emailjs.com/api/v1.0/email/send", {
+      service_id: EMAILJS_SERVICE_ID,
+      template_id: EMAILJS_TEMPLATE_ID,
+      user_id: EMAILJS_PUBLIC_KEY,
+      template_params: {
+        to_email: NOTIFY_EMAIL,
+        signal: sig.label + ' 持续中',
+        price: price.toFixed(2),
+        symbol: SYMBOL,
+        interval: '1m',
+        time,
+        message: msg
+      }
+    });
+    console.log(`[${time}] Hold reminder sent: ${sig.label} @ ${price.toFixed(2)}`);
+  } catch(e) { console.log("Hold email error:", e.message); }
+}
+
 async function checkSignal() {
   const time = new Date().toLocaleTimeString();
   if (!monitorEnabled) { console.log(`[${time}] Paused`); return; }
   const now = Date.now();
-  if (now - lastSignalTime < SIGNAL_COOLDOWN_MS) { console.log(`[${time}] Cooldown`); return; }
   try {
-    const data = await fetchJSON(`https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=15m&limit=100`);
+    // Use 1m candles for real-time detection
+    const data = await fetchJSON(`https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=1m&limit=100`);
     const candles = data.map(d => ({time:d[0],open:+d[1],high:+d[2],low:+d[3],close:+d[4]}));
     lastPrice = candles[candles.length-1].close;
     const sig = detectSignal(candles);
+
     if (sig) {
-      if (sig.type === lastSignalType) { console.log(`[${time}] Same signal, skip`); return; }
-      console.log(`[${time}] Signal: ${sig.label} @ ${lastPrice}`);
-      lastSignalTime = now;
-      lastSignalType = sig.type;
-      const tpsl = analyzeTPSL(candles, sig.type);
-      const aiText = await getAIAnalysis(candles, sig);
-      await sendEmail(sig, tpsl, aiText);
+      if (sig.type !== lastSignalType) {
+        // New direction - send entry email
+        if (now - lastSignalTime >= SIGNAL_COOLDOWN_MS) {
+          console.log(`[${time}] NEW Signal: ${sig.label} @ ${lastPrice}`);
+          lastSignalTime = now;
+          lastSignalType = sig.type;
+          lastHoldReminderTime = now;
+          holdReminderSent = false;
+          const tpsl = analyzeTPSL(candles, sig.type);
+          const aiText = await getAIAnalysis(candles, sig);
+          await sendEmail(sig, tpsl, aiText);
+        }
+      } else {
+        // Same direction - check if hold reminder needed (every 5 min)
+        if (!holdReminderSent && now - lastHoldReminderTime >= HOLD_REMINDER_MS) {
+          console.log(`[${time}] Hold reminder: ${sig.label} @ ${lastPrice}`);
+          lastHoldReminderTime = now;
+          holdReminderSent = true; // only send once per signal
+          await sendHoldEmail(sig, lastPrice);
+        } else {
+          console.log(`[${time}] Same signal ${sig.label} @ ${lastPrice?.toFixed(2)}`);
+        }
+      }
     } else {
-      lastSignalType = null;
-      console.log(`[${time}] No signal. Price: ${lastPrice?.toFixed(2)}`);
+      if (lastSignalType) {
+        console.log(`[${time}] Signal ended. Price: ${lastPrice?.toFixed(2)}`);
+        lastSignalType = null;
+        holdReminderSent = false;
+      } else {
+        console.log(`[${time}] No signal. Price: ${lastPrice?.toFixed(2)}`);
+      }
     }
   } catch(e) { console.log(`[${time}] Error:`, e.message); }
 }
