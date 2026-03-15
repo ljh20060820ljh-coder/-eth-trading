@@ -98,6 +98,18 @@ canvas{width:100% !important;height:auto !important;display:block;}
 .send-btn.inactive{background:rgba(255,255,255,0.07);color:#555;cursor:not-allowed;}
 .email-status{margin-top:8px;font-size:12px;min-height:18px;}
 .email-hint{margin-top:8px;font-size:11px;color:var(--dim);}
+.monitor-switch{display:flex;align-items:center;gap:12px;background:var(--bg2);border-radius:10px;padding:14px 16px;margin-bottom:16px;border:1px solid rgba(255,255,255,0.06);}
+.switch-toggle{position:relative;width:52px;height:28px;cursor:pointer;}
+.switch-toggle input{opacity:0;width:0;height:0;}
+.switch-slider{position:absolute;inset:0;background:rgba(255,255,255,0.1);border-radius:28px;transition:0.3s;}
+.switch-slider:before{content:'';position:absolute;width:22px;height:22px;left:3px;top:3px;background:#fff;border-radius:50%;transition:0.3s;}
+.switch-toggle input:checked + .switch-slider{background:var(--green);}
+.switch-toggle input:checked + .switch-slider:before{transform:translateX(24px);}
+.switch-info{flex:1;}
+.switch-title{font-size:12px;color:#fff;margin-bottom:2px;}
+.switch-status{font-size:11px;}
+.switch-status.on{color:var(--green);}
+.switch-status.off{color:var(--red);}
 .section-title{font-size:10px;letter-spacing:3px;color:var(--gold);margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid rgba(240,180,41,0.15);}
 .panel{background:var(--bg2);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:16px;margin-bottom:16px;}
 .fg-meter{position:relative;height:12px;background:linear-gradient(to right,#ff1744,#ff9800,#ffeb3b,#8bc34a,#00e676);border-radius:6px;margin:12px 0;}
@@ -254,6 +266,17 @@ canvas{width:100% !important;height:auto !important;display:block;}
     <div id="aiContent"><div style="color:var(--dim);font-size:12px;">等待信号触发...</div></div>
     <button class="ai-ask-btn" onclick="requestAIAnalysis()">重新分析</button>
   </div>
+  <div class="monitor-switch" id="monitorSwitchPanel">
+    <label class="switch-toggle">
+      <input type="checkbox" id="monitorToggle" checked onchange="toggleMonitor(this.checked)">
+      <span class="switch-slider"></span>
+    </label>
+    <div class="switch-info">
+      <div class="switch-title">后台监控通知</div>
+      <div class="switch-status on" id="switchStatus">开启中 · 24小时自动盯盘发邮件</div>
+    </div>
+    <div id="serverPrice" style="font-family:'Orbitron',monospace;font-size:13px;color:var(--dim);">--</div>
+  </div>
   <div class="email-panel">
     <div class="panel-title">邮件通知设置</div>
     <div class="email-row">
@@ -376,6 +399,9 @@ var entrySignalType = null;
 var priceAlerts = [];
 var signalHistory = [];
 var currentHistoryId = null;
+var lastSignalTime = 0;
+var SIGNAL_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes
+var SERVER_URL = ''; // will be set after Railway deploy
 var INTERVALS = ["1m","15m","1h","4h"];
 
 // ===== ADAPTIVE SIGNAL PARAMS (self-learning) =====
@@ -819,13 +845,18 @@ function updateSignal() {
   if(sig){
     box.className='signal-box '+sig.cssClass;val.textContent=sig.label;btn.className='send-btn active';
     if(!inPosition){
+      // Check cooldown
+      var now = Date.now();
+      if(now - lastSignalTime < SIGNAL_COOLDOWN_MS) return;
       var tpsl=analyzeTPSL(data,sig.type);currentTPSL=tpsl;
       updateTPSLPanel(sig,tpsl,data[data.length-1].close);
       panel.classList.remove('hidden');inPosition=true;entrySignalType=sig.type;
       monitor.style.display='block';
       if(sig.type!==lastSignalSent){
+        var validIvs=['15m','1h','4h','1d'];
         var email=document.getElementById('emailInput').value;
-        if(email){sendEntryEmail(sig,tpsl);lastSignalSent=sig.type;}
+        if(email && validIvs.indexOf(currentInterval)!==-1){sendEntryEmail(sig,tpsl);lastSignalSent=sig.type;}
+        lastSignalTime = Date.now();
         var rsi=calcRSI(data);
         saveHistory(sig,data[data.length-1].close,rsi);
         requestAIAnalysis();
@@ -920,6 +951,8 @@ function testSend(){if(currentSignal&&currentTPSL)sendEntryEmail(currentSignal,c
 function showStatus(msg,color){var el=document.getElementById('emailStatus');el.textContent=msg;el.style.color=color;setTimeout(function(){el.textContent='';},5000);}
 
 function saveHistory(sig,price,rsi) {
+  var validIntervals=['15m','1h','4h','1d'];
+  if(validIntervals.indexOf(currentInterval)===-1) return;
   currentHistoryId=Date.now();
   signalHistory.unshift({id:currentHistoryId,type:sig.type,label:sig.label,price:price,time:new Date().toLocaleString('zh-CN'),result:'open',exitPrice:null,interval:currentInterval,aiAnalysis:null,rsiAtEntry:rsi,timestamp:Date.now()});
   try{localStorage.setItem('eth_signal_history',JSON.stringify(signalHistory.slice(0,50)));}catch(e){}
@@ -967,7 +1000,14 @@ function renderHistory() {
     var aiBtn=h.aiAnalysis?'<button onclick="toggleAI('+h.id+')" style="background:rgba(167,139,250,0.15);border:1px solid rgba(167,139,250,0.3);border-radius:4px;color:#a78bfa;font-size:10px;padding:2px 8px;cursor:pointer;margin-left:4px;">AI分析</button>':'';
     var aiDetail=h.aiAnalysis?'<div id="ai-detail-'+h.id+'" style="display:none;margin-top:8px;padding:10px;background:rgba(167,139,250,0.07);border-radius:6px;font-size:11px;color:var(--text);line-height:1.8;border:1px solid rgba(167,139,250,0.2);">'+h.aiAnalysis.split('\n').join('<br>')+'</div>':'';
     var rsiInfo=h.rsiAtEntry?'<span style="font-size:10px;color:var(--dim)">RSI '+h.rsiAtEntry.toFixed(0)+'</span>':'';
-    return '<div class="history-item"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="hist-dir '+(h.type==='LONG'?'long':'short')+'">'+(h.type==='LONG'?'做多':'做空')+'</span><span style="font-size:11px">'+h.interval+'</span><span style="font-family:Orbitron,monospace;font-size:12px">'+h.price.toFixed(2)+'</span>'+(h.exitPrice?'<span style="font-size:11px;color:var(--dim)">→ '+h.exitPrice.toFixed(2)+'</span>':'')+rsiInfo+'<span style="font-size:10px;color:var(--dim)">'+h.time+'</span>'+aiBtn+'<span class="hist-result '+h.result+'" style="margin-left:auto;">'+(h.result==='win'?'盈利':h.result==='loss'?'亏损':h.result==='expired'?'已过期':'持仓中')+'</span></div>'+aiDetail+'</div>';
+    var pnlInfo='';
+    if(h.exitPrice && h.price){
+      var pnlPct=((h.exitPrice-h.price)/h.price*100);
+      if(h.type==='SHORT') pnlPct=-pnlPct;
+      var pnlColor=pnlPct>=0?'var(--green)':'var(--red)';
+      pnlInfo='<span style="font-size:11px;font-family:Orbitron,monospace;color:'+pnlColor+'">'+(pnlPct>=0?'+':'')+pnlPct.toFixed(2)+'%</span>';
+    }
+    return '<div class="history-item"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="hist-dir '+(h.type==='LONG'?'long':'short')+'">'+(h.type==='LONG'?'做多':'做空')+'</span><span style="font-size:11px">'+h.interval+'</span><span style="font-family:Orbitron,monospace;font-size:12px">'+h.price.toFixed(2)+'</span>'+(h.exitPrice?'<span style="font-size:11px;color:var(--dim)">→ '+h.exitPrice.toFixed(2)+'</span>':'')+pnlInfo+rsiInfo+'<span style="font-size:10px;color:var(--dim)">'+h.time+'</span>'+aiBtn+'<span class="hist-result '+h.result+'" style="margin-left:auto;">'+(h.result==='win'?'盈利':h.result==='loss'?'亏损':h.result==='expired'?'已过期':'持仓中')+'</span></div>'+aiDetail+'</div>';
   }).join('');
 }
 
@@ -1076,6 +1116,39 @@ document.getElementById('tabs').addEventListener('click',function(e){
   fetchCandles(currentInterval);
 });
 
+// ===== MONITOR SWITCH =====
+async function toggleMonitor(enabled) {
+  var statusEl = document.getElementById('switchStatus');
+  if (!SERVER_URL) {
+    // No server yet - just control local notifications
+    statusEl.textContent = enabled ? '开启中 · 本地通知已启用' : '已关闭 · 睡个好觉';
+    statusEl.className = 'switch-status ' + (enabled ? 'on' : 'off');
+    return;
+  }
+  try {
+    var res = await fetch(SERVER_URL + (enabled ? '/enable' : '/disable'), {method:'POST'});
+    var data = await res.json();
+    statusEl.textContent = data.enabled ? '开启中 · 24小时自动盯盘发邮件' : '已关闭 · 睡个好觉';
+    statusEl.className = 'switch-status ' + (data.enabled ? 'on' : 'off');
+  } catch(e) {
+    statusEl.textContent = enabled ? '开启中 · 本地通知已启用' : '已关闭 · 睡个好觉';
+    statusEl.className = 'switch-status ' + (enabled ? 'on' : 'off');
+  }
+}
+
+async function fetchServerStatus() {
+  if (!SERVER_URL) return;
+  try {
+    var res = await fetch(SERVER_URL + '/status');
+    var data = await res.json();
+    document.getElementById('monitorToggle').checked = data.enabled;
+    var statusEl = document.getElementById('switchStatus');
+    statusEl.textContent = data.enabled ? '开启中 · 24小时自动盯盘' : '已关闭 · 睡个好觉';
+    statusEl.className = 'switch-status ' + (data.enabled ? 'on' : 'off');
+    if (data.lastPrice) document.getElementById('serverPrice').textContent = (+data.lastPrice).toFixed(2);
+  } catch(e) {}
+}
+
 // Init
 loadParams();loadHistory();renderAlerts();
 INTERVALS.forEach(function(iv){fetchCandles(iv);});
@@ -1084,6 +1157,8 @@ selfLearn();
 
 setInterval(function(){INTERVALS.forEach(function(iv){fetchCandles(iv);});},10000);
 setInterval(fetchTicker,1000);
+fetchServerStatus();
+setInterval(fetchServerStatus, 30000);
 setInterval(fetchBTCCandles,60000);
 setInterval(fetchFearGreed,300000);
 setInterval(fetchDominance,300000);
