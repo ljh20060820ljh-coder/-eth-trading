@@ -5,8 +5,8 @@ const crypto = require('crypto');
 // ============================================================
 // 配置区 - 填入你的币安API Key
 // ============================================================
-const BINANCE_API_KEY = 'YOUR_API_KEY_HERE';      // 填入你的API Key
-const BINANCE_SECRET = 'YOUR_SECRET_KEY_HERE';    // 填入你的Secret Key
+const BINANCE_API_KEY = 'yfVasX0Ajqeb8IrauKvr6Le3jjW2ZoYvcWehSqXP1T5QCymmDZAmWVJUYdDVkmgX';      // 填入你的API Key
+const BINANCE_SECRET = 'kTS00yZ1TIfHHcWqTvZXd3e7D5PVaCrXIvshCK2bsZ110z7PzMxysUVA074zzBjG';    // 填入你的Secret Key
 
 const EMAILJS_SERVICE_ID = "service_op2rg49";
 const EMAILJS_TEMPLATE_ID = "template_eftwoy6";
