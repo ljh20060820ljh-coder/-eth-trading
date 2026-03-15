@@ -456,6 +456,7 @@ async function checkSignal() {
 
   try {
     const data = await fetchJSON(`https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=1m&limit=100`);
+    if (!Array.isArray(data)) { console.log(`[${time}] API error:`, JSON.stringify(data).slice(0,100)); return; }
     const candles = data.map(d => ({time:d[0],open:+d[1],high:+d[2],low:+d[3],close:+d[4]}));
     lastPrice = candles[candles.length-1].close;
 
