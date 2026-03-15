@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ETH 智能看盘工具</title>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<link rel="manifest" href="/manifest.json">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ETH看盘">
+<meta name="theme-color" content="#f0b429">
 <style>
 :root{--bg:#070b12;--bg2:#0d1421;--bg3:#111c2e;--gold:#f0b429;--green:#00e676;--red:#ff1744;--blue:#00cfff;--purple:#a78bfa;--text:#c8d8e8;--dim:rgba(200,216,232,0.35);}
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1082,6 +1088,17 @@ setInterval(fetchBTCCandles,60000);
 setInterval(fetchFearGreed,300000);
 setInterval(fetchDominance,300000);
 setInterval(generateWhales,30000);
+</script>
+<script>
+if('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('/sw.js').then(function(reg) {
+      console.log('SW registered');
+    }).catch(function(err) {
+      console.log('SW failed:', err);
+    });
+  });
+}
 </script>
 </body>
 </html>
