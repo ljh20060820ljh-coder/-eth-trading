@@ -151,6 +151,18 @@ canvas{width:100% !important;height:auto !important;display:block;}
 .accuracy-fill{height:100%;border-radius:4px;background:linear-gradient(to right,var(--red),var(--gold),var(--green));transition:width 0.8s;}
 .monitor-box{display:none;background:var(--bg2);border:1px solid rgba(240,180,41,0.2);border-radius:8px;padding:12px;margin-bottom:16px;}
 .corr-value{font-family:'Orbitron',monospace;font-size:28px;font-weight:900;text-align:center;margin:8px 0;}
+.ai-panel{background:var(--bg2);border-radius:10px;padding:16px;margin-bottom:16px;border:1px solid rgba(167,139,250,0.3);}
+.ai-panel-title{font-size:10px;letter-spacing:3px;color:var(--purple);margin-bottom:12px;}
+.ai-thinking{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:12px;}
+.ai-dots span{animation:pulse 1s infinite;display:inline-block;}
+.ai-dots span:nth-child(2){animation-delay:0.2s;}
+.ai-dots span:nth-child(3){animation-delay:0.4s;}
+.ai-content{font-size:12px;line-height:1.8;color:var(--text);}
+.ai-content .ai-bull{color:var(--green);}
+.ai-content .ai-bear{color:var(--red);}
+.ai-content .ai-neutral{color:var(--gold);}
+.ai-ask-btn{margin-top:10px;padding:8px 16px;background:rgba(167,139,250,0.2);border:1px solid rgba(167,139,250,0.4);border-radius:6px;color:var(--purple);font-family:'Share Tech Mono',monospace;font-size:12px;cursor:pointer;transition:all 0.2s;}
+.ai-ask-btn:hover{background:rgba(167,139,250,0.3);}
 @media(max-width:600px){
   .price-display{font-size:26px;}
   .header{flex-direction:column;gap:12px;}
@@ -229,6 +241,11 @@ canvas{width:100% !important;height:auto !important;display:block;}
   <div class="monitor-box" id="monitorBox">
     <div style="font-size:10px;color:var(--gold);letter-spacing:2px;margin-bottom:6px;">持仓监控中</div>
     <div id="monitorStatus" style="font-size:12px;color:var(--dim);"></div>
+  </div>
+  <div class="ai-panel" id="aiPanel" style="display:none;">
+    <div class="ai-panel-title">DeepSeek AI u5b9eu65f6u5206u6790</div>
+    <div id="aiContent"><div class="ai-thinking">AIu5206u6790u4e2d...</div></div>
+    <button class="ai-ask-btn" onclick="requestAIAnalysis()">u91cdu65b0u5206u6790</button>
   </div>
   <div class="email-panel">
     <div class="panel-title">邮件通知设置</div>
@@ -338,6 +355,7 @@ canvas{width:100% !important;height:auto !important;display:block;}
 
 <script>
 var EMAILJS_SERVICE_ID = "service_op2rg49";
+var DEEPSEEK_API_KEY = "sk-807bdf2c1e164c818519243bacb72a72";
 var EMAILJS_TEMPLATE_ID = "template_eftwoy6";
 var EMAILJS_PUBLIC_KEY = "8hV-qEj_65-Yjk1Pn";
 
@@ -749,6 +767,7 @@ function updateSignal() {
         var email = document.getElementById('emailInput').value;
         if(email) { sendEntryEmail(sig, tpsl); lastSignalSent = sig.type; }
         saveHistory(sig, data[data.length-1].close);
+        requestAIAnalysis();
       }
     } else {
       var exit = monitorExit(data, entrySignalType, currentTPSL);
@@ -981,6 +1000,66 @@ document.getElementById('tabs').addEventListener('click', function(e) {
   document.getElementById('chartLoading').style.display = 'flex';
   fetchCandles(currentInterval);
 });
+
+// ==================== DEEPSEEK AI ANALYSIS ====================
+async function requestAIAnalysis() {
+  var data = candleMap[currentInterval];
+  if(!data || data.length < 20) return;
+  var panel = document.getElementById('aiPanel');
+  var content = document.getElementById('aiContent');
+  panel.style.display = 'block';
+  content.innerHTML = '<div class="ai-thinking">DeepSeek AI 分析中，请稍候...</div>';
+
+  var price = lastPrice || data[data.length-1].close;
+  var rsi = calcRSI(data);
+  var ma5arr = calcMA(data,5), ma10arr = calcMA(data,10), ma20arr = calcMA(data,20);
+  var ma5 = ma5arr[ma5arr.length-1], ma10 = ma10arr[ma10arr.length-1], ma20 = ma20arr[ma20arr.length-1];
+  var atr = calcATR(data, 14);
+  var recent = data.slice(-5);
+  var trend = ma5 > ma10 && ma10 > ma20 ? '多头排列' : ma5 < ma10 && ma10 < ma20 ? '空头排列' : '均线纠缠';
+  var lastCandle = data[data.length-1];
+  var candleType = lastCandle.close > lastCandle.open ? '阳线' : '阴线';
+
+  var prompt = "你是一个专业的加密货币技术分析师。请用中文分析以下ETH/USDT " + currentInterval + " 周期数据，给出简洁的交易建议：\n\n" +
+    "当前价格：" + price.toFixed(2) + " USDT\n" +
+    "24H涨跌：" + (ticker ? (+ticker.priceChangePercent).toFixed(2) : '--') + "%\n" +
+    "MA5：" + (ma5||0).toFixed(2) + "\n" +
+    "MA10：" + (ma10||0).toFixed(2) + "\n" +
+    "MA20：" + (ma20||0).toFixed(2) + "\n" +
+    "均线形态：" + trend + "\n" +
+    "RSI(14)：" + (rsi ? rsi.toFixed(1) : '--') + "\n" +
+    "ATR波动：" + atr.toFixed(2) + "\n" +
+    "最新K线：" + candleType + "，开" + lastCandle.open.toFixed(2) + " 高" + lastCandle.high.toFixed(2) + " 低" + lastCandle.low.toFixed(2) + " 收" + lastCandle.close.toFixed(2) + "\n\n" +
+    "请分析：1.当前趋势判断 2.建议做多还是做空还是观望 3.关键支撑压力位 4.风险提示。回答控制在150字以内，简洁直接。";
+
+  try {
+    var res = await fetch("https://api.deepseek.com/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + DEEPSEEK_API_KEY
+      },
+      body: JSON.stringify({
+        model: "deepseek-chat",
+        messages: [{role: "user", content: prompt}],
+        max_tokens: 300,
+        temperature: 0.3
+      })
+    });
+    var result = await res.json();
+    if(result.choices && result.choices[0]) {
+      var text = result.choices[0].message.content;
+      text = text.replace(/(做多|看多|买入|多头)/g, '<span class="ai-bull">$1</span>');
+      text = text.replace(/(做空|看空|卖出|空头)/g, '<span class="ai-bear">$1</span>');
+      text = text.replace(/(观望|中性|谨慎)/g, '<span class="ai-neutral">$1</span>');
+      content.innerHTML = '<div class="ai-content">' + text.replace(/\n/g, '<br>') + '</div>';
+    } else {
+      content.innerHTML = '<div style="color:var(--red);font-size:12px;">分析失败：' + (result.error ? result.error.message : '未知错误') + '</div>';
+    }
+  } catch(e) {
+    content.innerHTML = '<div style="color:var(--red);font-size:12px;">网络错误，请重试</div>';
+  }
+}
 
 // Init
 loadHistory();
