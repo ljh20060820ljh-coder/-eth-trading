@@ -108,10 +108,38 @@ function detectSignal(data) {
   const ma5p = calcMA(data.slice(0,-1), 5), ma10p = calcMA(data.slice(0,-1), 10);
   if (!ma5l||!ma10l||!ma20l) return null;
   const rsi = calcRSI(data);
-  const bull = ma5l>ma10l&&ma10l>ma20l&&ma5p<=ma10p&&data[last].close>ma5l;
-  const bear = ma5l<ma10l&&ma10l<ma20l&&ma5p>=ma10p&&data[last].close<ma5l;
-  if (bull) return { type:'LONG', label:'做多', rsi };
-  if (bear) return { type:'SHORT', label:'做空', rsi };
+  const atr = calcATR(data);
+  const price = data[last].close;
+
+  // 1. 均线金叉做多（无RSI限制，大胆触发）
+  const maBull = ma5l>ma10l && ma10l>ma20l && ma5p<=ma10p && price>ma5l;
+  const maBear = ma5l<ma10l && ma10l<ma20l && ma5p>=ma10p && price<ma5l;
+
+  // 2. 突破信号 - 价格突破近30根K线高点/低点
+  const recent30 = data.slice(-30);
+  const highest = Math.max(...recent30.slice(0,-1).map(c=>c.high));
+  const lowest = Math.min(...recent30.slice(0,-1).map(c=>c.low));
+  const breakoutBull = price > highest && data[last].close > data[last].open;
+  const breakoutBear = price < lowest && data[last].close < data[last].open;
+
+  // 3. 强势追涨信号 - 连续3根阳线且均线多头
+  const last3Bull = data[last].close>data[last].open && data[last-1].close>data[last-1].open && data[last-2].close>data[last-2].open;
+  const last3Bear = data[last].close<data[last].open && data[last-1].close<data[last-1].open && data[last-2].close<data[last-2].open;
+  const trendBull = last3Bull && ma5l>ma20l;
+  const trendBear = last3Bear && ma5l<ma20l;
+
+  // 综合判断 - 任一信号触发即可
+  const isBull = maBull || breakoutBull || trendBull;
+  const isBear = maBear || breakoutBear || trendBear;
+
+  if (isBull) {
+    const reason = breakoutBull ? '突破前高' : trendBull ? '连续阳线追涨' : '均线金叉';
+    return { type:'LONG', label:'做多', rsi, reason };
+  }
+  if (isBear) {
+    const reason = breakoutBear ? '突破前低' : trendBear ? '连续阴线追空' : '均线死叉';
+    return { type:'SHORT', label:'做空', rsi, reason };
+  }
   return null;
 }
 
@@ -160,7 +188,7 @@ async function getAIAnalysis(data, sig) {
 async function sendEmail(sig, tpsl, aiText) {
   const price = lastPrice ? lastPrice.toFixed(2) : '--';
   const time = new Date().toLocaleString('zh-CN', {timeZone:'Asia/Shanghai'});
-  const msg = `【进场信号】${sig.label}\n【时间】${time}\n【入场价】${price}\n【止损位】${tpsl.sl}\n【止盈一】${tpsl.tp1}\n【止盈二】${tpsl.tp2}\n${tpsl.rsi?`【RSI】${tpsl.rsi.toFixed(1)}`:''}\n\n${aiText?`【AI分析】\n${aiText}\n\n`:''}注意风险，请结合自身判断操作`;
+  const msg = `【进场信号】${sig.label}\n【触发原因】${sig.reason||'均线信号'}\n【时间】${time}\n【入场价】${price}\n【止损位】${tpsl.sl}\n【止盈一】${tpsl.tp1}\n【止盈二】${tpsl.tp2}\n${tpsl.rsi?`【RSI】${tpsl.rsi.toFixed(1)}`:''}\n\n${aiText?`【AI分析】\n${aiText}\n\n`:''}注意风险，请结合自身判断操作`;
   try {
     await postJSON("https://api.emailjs.com/api/v1.0/email/send", {
       service_id:EMAILJS_SERVICE_ID,
