@@ -272,28 +272,9 @@ canvas{width:100% !important;height:auto !important;display:block;}
       <span class="switch-slider"></span>
     </label>
     <div class="switch-info">
-      <div class="switch-title">自动交易 · <span id="tradingMode" style="color:var(--gold)">模拟模式</span></div>
-      <div class="switch-status on" id="switchStatus">开启中 · 24小时自动盯盘</div>
+      <div class="switch-title">后台监控通知</div>
+      <div class="switch-status on" id="switchStatus">开启中 · 24小时自动盯盘发邮件</div>
     </div>
-    <button onclick="toggleMode()" style="background:rgba(167,139,250,0.2);border:1px solid rgba(167,139,250,0.4);border-radius:6px;color:#a78bfa;font-family:'Share Tech Mono',monospace;font-size:11px;padding:4px 10px;cursor:pointer;" id="modeBtn">切换实盘</button>
-  </div>
-  <div id="tradingDashboard" style="background:var(--bg2);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:16px;margin-bottom:16px;">
-    <div style="font-size:10px;color:var(--gold);letter-spacing:3px;margin-bottom:12px;">自动交易状态</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px;">
-      <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:10px;">
-        <div style="font-size:10px;color:var(--dim);margin-bottom:4px;">今日盈亏</div>
-        <div style="font-family:'Orbitron',monospace;font-size:15px;" id="tdDailyPnL">--</div>
-      </div>
-      <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:10px;">
-        <div style="font-size:10px;color:var(--dim);margin-bottom:4px;">胜率</div>
-        <div style="font-family:'Orbitron',monospace;font-size:15px;" id="tdWinRate">--%</div>
-      </div>
-      <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:10px;">
-        <div style="font-size:10px;color:var(--dim);margin-bottom:4px;">交易次数</div>
-        <div style="font-family:'Orbitron',monospace;font-size:15px;" id="tdTradeCount">0</div>
-      </div>
-    </div>
-    <div id="tdPosition" style="font-size:12px;color:var(--dim);">暂无持仓</div>
   </div>
   <div class="email-panel">
     <div class="panel-title">邮件通知设置</div>
@@ -419,7 +400,7 @@ var signalHistory = [];
 var currentHistoryId = null;
 var lastSignalTime = 0;
 var SIGNAL_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes
-var SERVER_URL = 'https://eth-trading-production.up.railway.app';
+var SERVER_URL = 'https://eth-trading.onrender.com';
 var INTERVALS = ["1m","15m","1h","4h"];
 
 // ===== ADAPTIVE SIGNAL PARAMS (self-learning) =====
@@ -1161,47 +1142,8 @@ async function fetchServerStatus() {
     var data = await res.json();
     document.getElementById('monitorToggle').checked = data.enabled;
     var statusEl = document.getElementById('switchStatus');
-    statusEl.textContent = data.enabled ? '开启中 · 24小时自动交易' : '已关闭 · 睡个好觉';
+    statusEl.textContent = data.enabled ? '开启中 · 24小时自动盯盘发邮件' : '已关闭 · 睡个好觉';
     statusEl.className = 'switch-status ' + (data.enabled ? 'on' : 'off');
-    // Mode
-    var modeEl = document.getElementById('tradingMode');
-    var modeBtn = document.getElementById('modeBtn');
-    if (modeEl) { modeEl.textContent = data.paperTrading ? '模拟模式' : '实盘模式'; modeEl.style.color = data.paperTrading ? 'var(--gold)' : 'var(--green)'; }
-    if (modeBtn) modeBtn.textContent = data.paperTrading ? '切换实盘' : '切换模拟';
-    // PnL
-    var pnlEl = document.getElementById('tdDailyPnL');
-    if (pnlEl && data.dailyPnL !== undefined) {
-      pnlEl.textContent = (data.dailyPnL >= 0 ? '+' : '') + data.dailyPnL.toFixed(2) + 'U';
-      pnlEl.style.color = data.dailyPnL >= 0 ? 'var(--green)' : 'var(--red)';
-    }
-    var wrEl = document.getElementById('tdWinRate');
-    if (wrEl) { wrEl.textContent = data.winRate + '%'; wrEl.style.color = data.winRate >= 50 ? 'var(--green)' : 'var(--red)'; }
-    var tcEl = document.getElementById('tdTradeCount');
-    if (tcEl) tcEl.textContent = (data.wins||0) + 'W / ' + (data.losses||0) + 'L';
-    // Position
-    var posEl = document.getElementById('tdPosition');
-    if (posEl) {
-      if (data.currentPosition) {
-        var p = data.currentPosition;
-        var pnlColor = p.pnl >= 0 ? 'var(--green)' : 'var(--red)';
-        posEl.innerHTML = '持仓中: <span style="color:'+(p.type==="LONG"?"var(--green)":"var(--red)")+'">'+p.type+'</span> 入场 '+p.entryPrice+' · 浮动盈亏 <span style="color:'+pnlColor+'">'+(p.pnl>=0?'+':'')+p.pnl+'U</span>';
-      } else {
-        posEl.textContent = data.consecutiveLosses >= 3 ? '连续亏损3次，已暂停交易' : '暂无持仓，等待信号...';
-        posEl.style.color = data.consecutiveLosses >= 3 ? 'var(--red)' : 'var(--dim)';
-      }
-    }
-  } catch(e) {}
-}
-
-async function toggleMode() {
-  if (!SERVER_URL) return;
-  var isLive = document.getElementById('tradingMode').textContent === '实盘模式';
-  if (!isLive) {
-    if (!confirm('切换到实盘模式将使用真实资金交易，确认吗？')) return;
-  }
-  try {
-    await fetch(SERVER_URL + (isLive ? '/paper' : '/live'), {method:'POST'});
-    fetchServerStatus();
   } catch(e) {}
 }
 
