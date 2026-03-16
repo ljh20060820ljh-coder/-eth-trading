@@ -7,9 +7,9 @@ const EMAILJS_PUBLIC_KEY = "8hV-qEj_65-Yjk1Pn";
 const DEEPSEEK_API_KEY = "sk-807bdf2c1e164c818519243bacb72a72";
 const NOTIFY_EMAIL = "2183089849@qq.com";
 const SYMBOL = "ETHUSDT";
-const CHECK_INTERVAL_MS = 10 * 1000; // 10 seconds
-const SIGNAL_COOLDOWN_MS = 15 * 60 * 1000; // 15 min for new signals
-const HOLD_REMINDER_MS = 5 * 60 * 1000; // 5 min hold reminder
+const CHECK_INTERVAL_MS = 10 * 1000;
+const SIGNAL_COOLDOWN_MS = 15 * 60 * 1000;
+const HOLD_REMINDER_MS = 5 * 60 * 1000;
 
 let monitorEnabled = true;
 let lastHoldReminderTime = 0;
@@ -160,7 +160,7 @@ async function getAIAnalysis(data, sig) {
 async function sendEmail(sig, tpsl, aiText) {
   const price = lastPrice ? lastPrice.toFixed(2) : '--';
   const time = new Date().toLocaleString('zh-CN', {timeZone:'Asia/Shanghai'});
-  const msg = `【进场信号】${sig.label}\n【时间】${time}\n【入场价】${price}\n【止损位】${tpsl.sl}\n【止盈一】${tpsl.tp1}\n【止盈二】${tpsl.tp2}\n${tpsl.rsi?`【RSI】${tpsl.rsi.toFixed(1)}`:''}\n\n${aiText?`【AI分析】\n${aiText}\n\n`:''}⚠️ 注意风险，请结合自身判断操作`;
+  const msg = `【进场信号】${sig.label}\n【时间】${time}\n【入场价】${price}\n【止损位】${tpsl.sl}\n【止盈一】${tpsl.tp1}\n【止盈二】${tpsl.tp2}\n${tpsl.rsi?`【RSI】${tpsl.rsi.toFixed(1)}`:''}\n\n${aiText?`【AI分析】\n${aiText}\n\n`:''}注意风险，请结合自身判断操作`;
   try {
     await postJSON("https://api.emailjs.com/api/v1.0/email/send", {
       service_id:EMAILJS_SERVICE_ID,
@@ -169,32 +169,20 @@ async function sendEmail(sig, tpsl, aiText) {
       template_params:{to_email:NOTIFY_EMAIL,signal:sig.label,price,symbol:SYMBOL,interval:'15m',time,message:msg}
     });
     console.log(`[${time}] Email sent: ${sig.label} @ ${price}`);
-    return true;
-  } catch(e) { console.log("Email error:", e.message); return false; }
+  } catch(e) { console.log("Email error:", e.message); }
 }
 
 async function sendHoldEmail(sig, price) {
   const time = new Date().toLocaleString('zh-CN', {timeZone:'Asia/Shanghai'});
-  const msg = `【趋势持续提醒】${sig.label}方向持续中
-【当前价格】${price.toFixed(2)}
-【建议】趋势未变，继续持仓，不要轻易平仓
-【时间】${time}`;
+  const msg = `【趋势持续提醒】${sig.label}方向持续中\n【当前价格】${price.toFixed(2)}\n【建议】趋势未变，继续持仓\n【时间】${time}`;
   try {
     await postJSON("https://api.emailjs.com/api/v1.0/email/send", {
-      service_id: EMAILJS_SERVICE_ID,
-      template_id: EMAILJS_TEMPLATE_ID,
-      user_id: EMAILJS_PUBLIC_KEY,
-      template_params: {
-        to_email: NOTIFY_EMAIL,
-        signal: sig.label + ' 持续中',
-        price: price.toFixed(2),
-        symbol: SYMBOL,
-        interval: '1m',
-        time,
-        message: msg
-      }
+      service_id:EMAILJS_SERVICE_ID,
+      template_id:EMAILJS_TEMPLATE_ID,
+      user_id:EMAILJS_PUBLIC_KEY,
+      template_params:{to_email:NOTIFY_EMAIL,signal:sig.label+' 持续中',price:price.toFixed(2),symbol:SYMBOL,interval:'15m',time,message:msg}
     });
-    console.log(`[${time}] Hold reminder sent: ${sig.label} @ ${price.toFixed(2)}`);
+    console.log(`[${time}] Hold reminder sent`);
   } catch(e) { console.log("Hold email error:", e.message); }
 }
 
@@ -203,15 +191,14 @@ async function checkSignal() {
   if (!monitorEnabled) { console.log(`[${time}] Paused`); return; }
   const now = Date.now();
   try {
-    // Use 1m candles for real-time detection
-    const data = await fetchJSON(`https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=1m&limit=100`);
+    const data = await fetchJSON(`https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=15m&limit=100`);
+    if (!Array.isArray(data)) { console.log(`[${time}] API error:`, JSON.stringify(data).slice(0,100)); return; }
     const candles = data.map(d => ({time:d[0],open:+d[1],high:+d[2],low:+d[3],close:+d[4]}));
     lastPrice = candles[candles.length-1].close;
     const sig = detectSignal(candles);
 
     if (sig) {
       if (sig.type !== lastSignalType) {
-        // New direction - send entry email
         if (now - lastSignalTime >= SIGNAL_COOLDOWN_MS) {
           console.log(`[${time}] NEW Signal: ${sig.label} @ ${lastPrice}`);
           lastSignalTime = now;
@@ -223,26 +210,27 @@ async function checkSignal() {
           await sendEmail(sig, tpsl, aiText);
         }
       } else {
-        // Same direction - check if hold reminder needed (every 5 min)
         if (!holdReminderSent && now - lastHoldReminderTime >= HOLD_REMINDER_MS) {
-          console.log(`[${time}] Hold reminder: ${sig.label} @ ${lastPrice}`);
           lastHoldReminderTime = now;
-          holdReminderSent = true; // only send once per signal
+          holdReminderSent = true;
           await sendHoldEmail(sig, lastPrice);
         } else {
-          console.log(`[${time}] Same signal ${sig.label} @ ${lastPrice?.toFixed(2)}`);
+          console.log(`[${time}] ${sig.label} @ ${lastPrice.toFixed(2)}`);
         }
       }
     } else {
-      if (lastSignalType) {
-        console.log(`[${time}] Signal ended. Price: ${lastPrice?.toFixed(2)}`);
-        lastSignalType = null;
-        holdReminderSent = false;
-      } else {
-        console.log(`[${time}] No signal. Price: ${lastPrice?.toFixed(2)}`);
-      }
+      if (lastSignalType) { lastSignalType = null; holdReminderSent = false; }
+      console.log(`[${time}] No signal. Price: ${lastPrice.toFixed(2)}`);
     }
   } catch(e) { console.log(`[${time}] Error:`, e.message); }
+}
+
+// Keep-alive ping to prevent Render free tier sleep
+function keepAlive() {
+  const req = http.get(`http://localhost:${PORT}/status`, (res) => {
+    res.resume();
+  });
+  req.on('error', () => {});
 }
 
 const server = http.createServer((req, res) => {
@@ -253,15 +241,10 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && req.url === '/status') {
     res.writeHead(200, {'Content-Type':'application/json'});
-    res.end(JSON.stringify({
-      enabled: monitorEnabled,
-      lastPrice,
-      lastSignal: lastSignalType,
-      cooldownRemaining: Math.max(0, Math.round((SIGNAL_COOLDOWN_MS-(Date.now()-lastSignalTime))/60000))
-    }));
+    res.end(JSON.stringify({ enabled: monitorEnabled, lastPrice, lastSignal: lastSignalType }));
   } else if (req.method === 'POST' && req.url === '/toggle') {
     monitorEnabled = !monitorEnabled;
-    console.log(`Monitor ${monitorEnabled?'ENABLED':'DISABLED'}`);
+    console.log(`Monitor ${monitorEnabled ? 'ENABLED' : 'DISABLED'}`);
     res.writeHead(200, {'Content-Type':'application/json'});
     res.end(JSON.stringify({enabled: monitorEnabled}));
   } else if (req.method === 'POST' && req.url === '/enable') {
@@ -282,4 +265,5 @@ server.listen(PORT, () => {
   console.log(`Server on port ${PORT}`);
   checkSignal();
   setInterval(checkSignal, CHECK_INTERVAL_MS);
+  setInterval(keepAlive, 14 * 60 * 1000); // ping every 14 min to stay awake
 });
