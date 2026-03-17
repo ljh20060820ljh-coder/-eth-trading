@@ -1,6 +1,6 @@
 const https = require('https');
 const http = require('http');
-const fs = require('fs'); // 引入文件系统，用来存日志
+const fs = require('fs'); 
 
 // ==========================================
 // 🔑 完美密钥配置
@@ -15,13 +15,13 @@ const NOTIFY_EMAIL = "2183089849@qq.com";
 
 const SYMBOL = "ETHUSDT";
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; 
-const LOG_FILE = './trade_log.json'; // 交易日志存储文件
+const LOG_FILE = './trade_log.json'; 
 
 let currentPosition = null; 
 let lastPrice = null;
-let reflectedToday = false; // 标记今天是否已经复盘过
+let reflectedToday = false; 
 
-console.log("🚀 ETH 顶级量化 AI (附带交易日记与反思系统) 已上线...");
+console.log("🚀 ETH 顶级量化 AI (附带精准防误判系统) 已上线...");
 
 // --- 日志读写系统 ---
 function loadLogs() {
@@ -37,8 +37,8 @@ function addTradeLog(action, style, entryPrice) {
     id: Date.now().toString(),
     entryTime: new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }),
     entryTimestamp: Date.now(),
-    action: action,   // 做多 / 做空
-    style: style,     // 稳健 / 激进
+    action: action,   
+    style: style,     
     entryPrice: entryPrice,
     exitPrice: null,
     exitTime: null,
@@ -72,7 +72,7 @@ function postJSON(url, body, extraHeaders) {
 
 function fetchJSON(url) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'ETH-Monitor/3.0' } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': 'ETH-Monitor/3.1' } }, (res) => {
       let data = ''; res.on('data', chunk => data += chunk);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } });
     }).on('error', reject);
@@ -187,12 +187,10 @@ async function runMonitor() {
   const nowHour = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', hour12: false });
   const nowMin = new Date().getMinutes();
 
-  // 触发每日复盘 (每天 23:50 到 23:59 之间执行一次)
   if (nowHour === '23' && nowMin >= 50 && !reflectedToday) {
       await dailyReflection();
       reflectedToday = true;
   }
-  // 凌晨重置复盘标记
   if (nowHour === '00' && reflectedToday) reflectedToday = false;
 
   try {
@@ -204,15 +202,26 @@ async function runMonitor() {
     const aiResponse = await askAIForDecision(candles, currentPosition);
     if (!aiResponse) return;
     
+    // 🛡️ 终极修复：使用正则精准锁定【建议方向】这一行，绝对不看【操作逻辑】里的字眼
     let targetDir = null;
-    if (aiResponse.includes("做多")) targetDir = 'LONG';
-    else if (aiResponse.includes("做空")) targetDir = 'SHORT';
-    else if (aiResponse.includes("观望")) targetDir = 'WAIT';
+    const dirMatch = aiResponse.match(/【建议方向】.*?(做多|做空|观望)/);
+    if (dirMatch) {
+        if (dirMatch[1] === "做多") targetDir = 'LONG';
+        else if (dirMatch[1] === "做空") targetDir = 'SHORT';
+        else if (dirMatch[1] === "观望") targetDir = 'WAIT';
+    }
+    
+    // 如果连方向都没抓出来，说明AI回答格式彻底乱了，直接跳过
     if (!targetDir) return; 
 
-    const isAggressive = aiResponse.includes("激进");
-    const winRateMatch = aiResponse.match(/预计胜率[^\d]*(\d+)/);
+    // 同理，精准提取风格和胜率
+    const styleMatch = aiResponse.match(/【信号风格】.*?(稳健|激进)/);
+    const isAggressive = styleMatch ? (styleMatch[1] === "激进") : false;
+
+    const winRateMatch = aiResponse.match(/【预计胜率】[^\d]*(\d+)/);
     const winRate = winRateMatch ? parseInt(winRateMatch[1]) : 0;
+
+    console.log(`[${time}] 🧠 AI决定: 方向=${targetDir}, 风格=${isAggressive?"激进":"稳健"}, 胜率=${winRate}%`);
 
     let signalToEmail = null;
 
@@ -224,7 +233,11 @@ async function runMonitor() {
             currentPosition = null; 
         } else return;
     } else {
-        if (isAggressive && winRate < 70) return;
+        if (isAggressive && winRate < 70) {
+            console.log(`[${time}] 🚫 过滤垃圾激进单，胜率仅 ${winRate}%`);
+            return;
+        }
+        
         let actionStr = targetDir === 'LONG' ? "做多" : "做空";
         let styleStr = isAggressive ? "激进" : "稳健";
         
@@ -232,7 +245,6 @@ async function runMonitor() {
         else signalToEmail = `【紧急反手】请平掉原仓位，立刻反向${styleStr}${actionStr}`;
         
         currentPosition = targetDir; 
-        // 💾 触发交易信号时，写入本地日志！
         addTradeLog(actionStr, styleStr, lastPrice);
     }
 
@@ -241,9 +253,8 @@ async function runMonitor() {
   } catch (e) { console.error("循环报错:", e.message); }
 }
 
-// --- 🌐 Web 可视化控制台 (用于手动输入平仓价) ---
+// --- 🌐 Web 可视化控制台 ---
 http.createServer((req, res) => {
-  // 接口：提供给前端的 API 提交平仓数据
   if (req.url === '/api/close' && req.method === 'POST') {
       let body = '';
       req.on('data', chunk => body += chunk.toString());
@@ -254,12 +265,8 @@ http.createServer((req, res) => {
           if (trade) {
               trade.exitPrice = parseFloat(exitPrice);
               trade.exitTime = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
-              
-              // 计算持仓时间 (分钟)
               const mins = Math.round((Date.now() - trade.entryTimestamp) / 60000);
               trade.holdTime = `${Math.floor(mins / 60)}小时${mins % 60}分钟`;
-              
-              // 计算收益率 ROI
               let roi = 0;
               if (trade.action === '做多') roi = ((trade.exitPrice - trade.entryPrice) / trade.entryPrice) * 100;
               if (trade.action === '做空') roi = ((trade.entryPrice - trade.exitPrice) / trade.entryPrice) * 100;
@@ -273,15 +280,11 @@ http.createServer((req, res) => {
       });
       return;
   }
-
-  // 接口：返回 JSON 数据
   if (req.url === '/api/logs') {
       res.writeHead(200, {'Content-Type': 'application/json'});
-      res.end(JSON.stringify(loadLogs().reverse())); // 倒序，最新的在上面
+      res.end(JSON.stringify(loadLogs().reverse())); 
       return;
   }
-
-  // 页面：超酷的暗黑风管理后台
   res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
   res.end(`
     <!DOCTYPE html>
@@ -308,7 +311,7 @@ http.createServer((req, res) => {
     <body>
         <div class="container">
             <h2>📈 AI 交易日志 & 记账本</h2>
-            <p>当前系统状态: <b>运行中</b> | 市场现价: <b id="currPrice">获取中...</b></p>
+            <p>当前系统状态: <b>运行中</b></p>
             <table>
                 <thead>
                     <tr>
@@ -332,7 +335,6 @@ http.createServer((req, res) => {
                 logs.forEach(log => {
                     const isLong = log.action === '做多';
                     const dirClass = isLong ? 'bg-green' : 'bg-red';
-                    
                     let exitHtml = '', roiHtml = '-', timeHtml = '-', actionHtml = '';
                     if (log.status === 'OPEN') {
                         exitHtml = \`<input type="number" id="exit-\${log.id}" placeholder="输入价格">\`;
@@ -344,7 +346,6 @@ http.createServer((req, res) => {
                         roiHtml = \`<span class="badge \${isProfit ? 'bg-green' : 'bg-red'}">\${log.roi > 0 ? '+' : ''}\${log.roi}%</span>\`;
                         actionHtml = '<span class="badge bg-blue">已结算</span>';
                     }
-
                     html += \`<tr>
                         <td>\${log.entryTime.split(' ')[1]}<br><small style="color:#666">\${log.entryTime.split(' ')[0]}</small></td>
                         <td><span class="badge \${dirClass}">\${log.style} \${log.action}</span></td>
@@ -357,7 +358,6 @@ http.createServer((req, res) => {
                 });
                 document.getElementById('logTable').innerHTML = html;
             }
-
             async function closeTrade(id) {
                 const exitPrice = document.getElementById('exit-'+id).value;
                 if (!exitPrice) return alert("请输入平仓价！");
@@ -376,8 +376,8 @@ http.createServer((req, res) => {
 
 // --- 启动自检 ---
 async function startApp() {
-    console.log("🚀 日记与复盘系统挂机版启动...");
-    await sendSignalEmail("【系统升级】AI 管理控制台已上线", "你的 AI 已学会反思！<br>请在浏览器打开你的 Render 网址，即可进入可视化面板手动登记平仓。<br>每晚 23:50，系统会自动将当日交易整理发送给 AI 进行深度复盘，并发邮件汇报给你！", 0);
+    console.log("🚀 最新修复补丁已加载...");
+    await sendSignalEmail("【系统升级】AI 误判修复完成", "程序已经装上了【正则提取引擎】！<br>现在它会精准读取第一行的建议方向，绝对不会再因为下面一通长篇大论分析解释而误触发了！", 0);
     setInterval(runMonitor, CHECK_INTERVAL_MS);
     runMonitor();
 }
