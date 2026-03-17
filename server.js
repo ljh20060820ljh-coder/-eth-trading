@@ -21,7 +21,7 @@ let currentPosition = null;
 let lastPrice = null;
 let reflectedToday = false; 
 
-console.log("🚀 ETH 顶级量化 AI (JSON强解析内核) 已上线...");
+console.log("🚀 ETH 顶级量化 AI (JSON强解析内核 + CORS跨域开启) 已上线...");
 
 // --- 日志读写系统 ---
 function loadLogs() {
@@ -72,7 +72,7 @@ function postJSON(url, body, extraHeaders) {
 
 function fetchJSON(url) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'ETH-Monitor/4.0' } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': 'ETH-Monitor/5.0' } }, (res) => {
       let data = ''; res.on('data', chunk => data += chunk);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } });
     }).on('error', reject);
@@ -130,7 +130,7 @@ async function askAIForDecision(candles, currentPos) {
 
   const prompt = `你是一个顶级量化交易模型。当前数据: 现价${last.close}, MA5=${ma5.toFixed(2)}, RSI=${rsi.toFixed(1)}, ATR=${atr.toFixed(2)}, ${volSurge}。当前持仓: ${posText}。
 
-【强制要求】：你必须且只能回复一个合法的 JSON 对象，不要输出任何其他解释文字或Markdown！格式严格如下：
+【强制要求】：你必须且只能回复一个合法的 JSON 对象，不要输出任何其他解释文字！格式严格如下：
 {
   "direction": "WAIT", // 只能填 LONG(做多), SHORT(做空), 或 WAIT(观望)
   "style": "STEADY", // 只能填 STEADY(稳健), 或 AGGRESSIVE(激进)
@@ -190,7 +190,6 @@ async function runMonitor() {
     const aiResponse = await askAIForDecision(candles, currentPosition);
     if (!aiResponse) return;
     
-    // 🛡️ 降维打击：直接提取标准 JSON！绝不受废话干扰！
     let aiObj;
     try {
         const cleanStr = aiResponse.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```json/g, '').replace(/```/g, '').trim();
@@ -204,8 +203,6 @@ async function runMonitor() {
     const isAggressive = aiObj.style ? aiObj.style.toUpperCase() === 'AGGRESSIVE' : false;
     const winRate = parseInt(aiObj.win_rate) || 0;
 
-    console.log(`[${time}] 🧠 AI决定: 方向=${targetDir}, 激进=${isAggressive}, 胜率=${winRate}%`);
-
     let signalToEmail = null;
 
     if (targetDir === currentPosition) return; 
@@ -216,10 +213,7 @@ async function runMonitor() {
             currentPosition = null; 
         } else return;
     } else {
-        if (isAggressive && winRate < 70) {
-            console.log(`[${time}] 🚫 激进单胜率太低 (${winRate}%)，拦截入场！`);
-            return;
-        }
+        if (isAggressive && winRate < 70) return;
         
         let actionStr = targetDir === 'LONG' ? "做多" : "做空";
         let styleStr = isAggressive ? "激进" : "稳健";
@@ -231,7 +225,6 @@ async function runMonitor() {
         addTradeLog(actionStr, styleStr, lastPrice);
     }
 
-    // 💅 自动生成超级漂亮的 HTML 排版邮件
     let emailBody = `<b>【操作逻辑】</b><br>${aiObj.reason}<br><br>`;
     if (targetDir !== 'WAIT') {
         emailBody += `<b>【风控点位】</b><br>`;
@@ -246,8 +239,20 @@ async function runMonitor() {
   } catch (e) { console.error("循环报错:", e.message); }
 }
 
-// --- 🌐 Web 可视化控制台 ---
+// --- 🌐 Web 可视化控制台 (已开启 CORS 跨域) ---
 http.createServer((req, res) => {
+  // ⚡️ 核心：允许 Vercel 前端跨域访问数据
+  res.setHeader('Access-Control-Allow-Origin', '*'); 
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
+
+  if (req.url === '/status') {
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ status: "alive", position: currentPosition, price: lastPrice, enabled: true }));
+      return;
+  }
+
   if (req.url === '/api/close' && req.method === 'POST') {
       let body = '';
       req.on('data', chunk => body += chunk.toString());
@@ -266,8 +271,8 @@ http.createServer((req, res) => {
               trade.roi = roi.toFixed(2);
               trade.status = 'CLOSED';
               saveLogs(logs);
-              res.writeHead(200); res.end(JSON.stringify({success: true}));
-          } else { res.writeHead(400); res.end(JSON.stringify({error: "Trade not found"})); }
+              res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify({success: true}));
+          } else { res.writeHead(400, {'Content-Type': 'application/json'}); res.end(JSON.stringify({error: "Trade not found"})); }
       }); return;
   }
   if (req.url === '/api/logs') {
@@ -275,19 +280,12 @@ http.createServer((req, res) => {
       res.end(JSON.stringify(loadLogs().reverse())); return;
   }
   res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
-  res.end(`
-    <!DOCTYPE html><html><head><title>ETH 交易控制台</title><meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>body{font-family:sans-serif;background:#121212;color:#fff;padding:20px}.container{max-width:1000px;margin:auto;background:#1e1e1e;padding:20px;border-radius:10px}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;text-align:center;border-bottom:1px solid #333}th{background:#2d2d2d;color:#aaa}.badge{padding:4px 8px;border-radius:4px;font-size:12px;font-weight:bold}.bg-green{background:rgba(0,255,100,0.2);color:#00ff64}.bg-red{background:rgba(255,50,50,0.2);color:#ff3232}.bg-blue{background:rgba(0,150,255,0.2);color:#0096ff}input{width:80px;padding:6px;background:#333;border:1px solid #555;color:white;border-radius:4px}button{padding:6px 12px;background:#00d2ff;color:#000;border:none;border-radius:4px;cursor:pointer}</style></head>
-    <body><div class="container"><h2>📈 AI 交易日志 & 记账本</h2><p>当前系统状态: <b>运行中</b></p>
-    <table><thead><tr><th>入场时间</th><th>方向</th><th>入场价</th><th>平仓价</th><th>持仓时长</th><th>收益率(ROI)</th><th>操作</th></tr></thead><tbody id="logTable"></tbody></table></div>
-    <script>async function loadData(){const res=await fetch('/api/logs');const logs=await res.json();let html='';logs.forEach(log=>{const isLong=log.action==='做多';const dirClass=isLong?'bg-green':'bg-red';let exitHtml='',roiHtml='-',timeHtml='-',actionHtml='';if(log.status==='OPEN'){exitHtml=\`<input type="number" id="exit-\${log.id}" placeholder="输入价格">\`;actionHtml=\`<button onclick="closeTrade('\${log.id}')">保存平仓</button>\`;}else{exitHtml=log.exitPrice;timeHtml=log.holdTime;const isProfit=parseFloat(log.roi)>0;roiHtml=\`<span class="badge \${isProfit?'bg-green':'bg-red'}">\${log.roi>0?'+':''}\${log.roi}%</span>\`;actionHtml='<span class="badge bg-blue">已结算</span>';}html+=\`<tr><td>\${log.entryTime.split(' ')[1]}</td><td><span class="badge \${dirClass}">\${log.style} \${log.action}</span></td><td>\${log.entryPrice}</td><td>\${exitHtml}</td><td>\${timeHtml}</td><td>\${roiHtml}</td><td>\${actionHtml}</td></tr>\`;});document.getElementById('logTable').innerHTML=html;}async function closeTrade(id){const exitPrice=document.getElementById('exit-'+id).value;if(!exitPrice)return alert("请输入平仓价！");await fetch('/api/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,exitPrice})});loadData();}loadData();</script></body></html>
-  `);
+  res.end("API Server is running.");
 }).listen(process.env.PORT || 3000);
 
 // --- 启动自检 ---
 async function startApp() {
-    console.log("🚀 JSON 解析内核已加载...");
-    await sendSignalEmail("【系统升级】JSON 通信内核已激活", "本次升级为史诗级！<br>系统直接使用 JSON 数据传输，『人工智障』误报率降至 <b>0%</b>！<br>此外，邮件排版也全面升级，增加了 Emoji 视觉标识，看起来更像专业机构！", 0);
+    console.log("🚀 系统启动完成，CORS跨域已开启。");
     setInterval(runMonitor, CHECK_INTERVAL_MS);
     runMonitor();
 }
