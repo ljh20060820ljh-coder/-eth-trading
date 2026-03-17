@@ -1,5 +1,6 @@
 const https = require('https');
 const http = require('http');
+const fs = require('fs'); // 引入文件系统，用来存日志
 
 // ==========================================
 // 🔑 完美密钥配置
@@ -13,14 +14,40 @@ const DEEPSEEK_API_KEY = "sk-9afe367ef974483693b3e829b203dd6b";
 const NOTIFY_EMAIL = "2183089849@qq.com";
 
 const SYMBOL = "ETHUSDT";
-const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5分钟盯盘
+const CHECK_INTERVAL_MS = 5 * 60 * 1000; 
+const LOG_FILE = './trade_log.json'; // 交易日志存储文件
 
-// 🧠 核心升级：机器人的“仓位记忆大脑”
-let currentPosition = null; // 'LONG' (多单) | 'SHORT' (空单) | null (空仓)
-
+let currentPosition = null; 
 let lastPrice = null;
+let reflectedToday = false; // 标记今天是否已经复盘过
 
-console.log("🚀 ETH 顶级量化 AI (附带胜率过滤与仓位记忆) 已上线...");
+console.log("🚀 ETH 顶级量化 AI (附带交易日记与反思系统) 已上线...");
+
+// --- 日志读写系统 ---
+function loadLogs() {
+  if (fs.existsSync(LOG_FILE)) return JSON.parse(fs.readFileSync(LOG_FILE));
+  return [];
+}
+function saveLogs(logs) {
+  fs.writeFileSync(LOG_FILE, JSON.stringify(logs, null, 2));
+}
+function addTradeLog(action, style, entryPrice) {
+  const logs = loadLogs();
+  logs.push({
+    id: Date.now().toString(),
+    entryTime: new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }),
+    entryTimestamp: Date.now(),
+    action: action,   // 做多 / 做空
+    style: style,     // 稳健 / 激进
+    entryPrice: entryPrice,
+    exitPrice: null,
+    exitTime: null,
+    holdTime: null,
+    roi: null,
+    status: 'OPEN'
+  });
+  saveLogs(logs);
+}
 
 // --- 网络请求 ---
 function postJSON(url, body, extraHeaders) {
@@ -28,31 +55,25 @@ function postJSON(url, body, extraHeaders) {
     const data = JSON.stringify(body);
     const urlObj = new URL(url);
     const options = {
-      hostname: urlObj.hostname,
-      path: urlObj.pathname,
-      method: 'POST',
+      hostname: urlObj.hostname, path: urlObj.pathname, method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), ...(extraHeaders||{}) }
     };
     const mod = url.startsWith('https') ? https : http;
     const req = mod.request(options, (res) => {
-      let d = '';
-      res.on('data', c => d += c);
+      let d = ''; res.on('data', c => d += c);
       res.on('end', () => {
         if (res.statusCode !== 200) reject(new Error(`HTTP ${res.statusCode}: ${d}`));
         else { try { resolve(JSON.parse(d)); } catch(e) { resolve(d); } }
       });
     });
-    req.on('error', reject);
-    req.write(data);
-    req.end();
+    req.on('error', reject); req.write(data); req.end();
   });
 }
 
 function fetchJSON(url) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'ETH-Monitor/2.0' } }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
+    https.get(url, { headers: { 'User-Agent': 'ETH-Monitor/3.0' } }, (res) => {
+      let data = ''; res.on('data', chunk => data += chunk);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } });
     }).on('error', reject);
   });
@@ -63,204 +84,300 @@ function calcMA(data, period) {
   if (data.length < period) return 0;
   return data.slice(-period).reduce((sum, c) => sum + c.close, 0) / period;
 }
-
 function calcRSI(data, period = 14) {
   if (data.length < period + 1) return 50;
   let gains = 0, losses = 0;
   for (let i = data.length - period; i < data.length; i++) {
     const diff = data[i].close - data[i-1].close;
-    if (diff > 0) gains += diff;
-    else losses -= diff;
+    if (diff > 0) gains += diff; else losses -= diff;
   }
   const avgLoss = losses / period;
   if (avgLoss === 0) return 100;
   return 100 - (100 / (1 + (gains / period) / avgLoss));
 }
-
 function calcATR(data, period = 14) {
   if (data.length < period + 1) return 0;
   let sumTR = 0;
   for (let i = data.length - period; i < data.length; i++) {
-    const high = data[i].high;
-    const low = data[i].low;
-    const prevClose = data[i-1].close;
-    const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-    sumTR += tr;
+    const high = data[i].high, low = data[i].low, prevClose = data[i-1].close;
+    sumTR += Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
   }
   return sumTR / period;
 }
 
-// --- AI 策略大脑 (知道自己现在的持仓状态) ---
-async function askAIForDecision(candles, currentPos) {
-  const last = candles[candles.length - 1];
-  const prev = candles[candles.length - 2];
-  
-  const ma5 = calcMA(candles, 5);
-  const ma10 = calcMA(candles, 10);
-  const ma20 = calcMA(candles, 20);
-  const rsi = calcRSI(candles, 14);
-  const atr = calcATR(candles, 14); 
-  
-  const volSurge = last.volume > (prev.volume * 1.5) ? "⚠️成交量异常放大" : "成交量平稳";
-  
-  // 翻译机器人的持仓状态给 AI 听
-  const posText = currentPos === 'LONG' ? '持有多单 (看涨)' : currentPos === 'SHORT' ? '持有空单 (看跌)' : '空仓观望';
-
-  const prompt = `你是一个顶级加密货币量化交易模型。
-
-【最新盘面数据】（ETH/USDT 15分钟线）：
-- 当前价: ${last.close} (本轮最高${last.high}, 最低${last.low})
-- 均线状态: MA5=${ma5.toFixed(2)}, MA10=${ma10.toFixed(2)}, MA20=${ma20.toFixed(2)}
-- 相对强弱 RSI(14): ${rsi.toFixed(1)}
-- 真实波动率 ATR(14): ${atr.toFixed(2)}
-- 资金动向: ${volSurge}
-- 🚨 目前你的持仓状态: 【${posText}】
-
-【任务要求】（必须严格按以下格式输出）：
-【建议方向】：做多 / 做空 / 观望 （三选一。如果目前持仓趋势是对的，请继续输出原方向；如果该平仓避险了，请输出观望；如果趋势反转，输出相反方向）
-【信号风格】：稳健 / 激进 （二选一）
-【预计胜率】：XX% （必须填入 0 到 100 的纯数字）
-
-（如果建议做多/做空，必须提供以下点位；如果建议观望则不用写）：
-【止损价 (SL)】：xxxx 
-【第一止盈 (TP1)】：xxxx 
-【第二止盈 (TP2)】：xxxx 
-
-【操作逻辑】：简述理由。`;
-
-  try {
-    const result = await postJSON("https://api.deepseek.com/chat/completions", {
-      model: "deepseek-chat",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.4 
-    }, { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` });
-
-    if (result.choices && result.choices[0]) return result.choices[0].message.content;
-  } catch (e) { console.error("AI 请求失败:", e.message); }
-  return "AI 分析暂时不可用";
-}
-
 // --- 发信通道 ---
-async function sendSignalEmail(action, aiDecisionText, price) {
+async function sendSignalEmail(action, messageText, price, titleStr) {
   const time = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
-  const formattedMessage = aiDecisionText.replace(/\n/g, '<br>');
-
+  const formattedMessage = messageText.replace(/\n/g, '<br>');
   try {
     await postJSON("https://api.emailjs.com/api/v1.0/email/send", {
-      service_id: EMAILJS_SERVICE_ID,
-      template_id: EMAILJS_TEMPLATE_ID,
-      user_id: EMAILJS_PUBLIC_KEY, 
-      accessToken: EMAILJS_PRIVATE_KEY, 
+      service_id: EMAILJS_SERVICE_ID, template_id: EMAILJS_TEMPLATE_ID, user_id: EMAILJS_PUBLIC_KEY, accessToken: EMAILJS_PRIVATE_KEY, 
       template_params: { 
-        to_email: NOTIFY_EMAIL, 
-        symbol: SYMBOL,             
-        interval: "15分钟 K线",       
-        signal: action, // 这里会显示：开仓、反手、或平仓
-        price: price.toString(), 
-        message: formattedMessage,  
-        time: time 
+        to_email: NOTIFY_EMAIL, symbol: SYMBOL, interval: titleStr || "15分钟 K线", 
+        signal: action, price: price.toString(), message: formattedMessage, time: time 
       }
     });
     console.log(`[${time}] 📧 邮件已发出: ${action}`);
-  } catch (e) {
-    console.error(`[${time}] ❌ 邮件发送失败: ${e.message}`);
-  }
+  } catch (e) { console.error(`[${time}] ❌ 发信失败: ${e.message}`); }
 }
 
-// --- 监控主循环 (核心风控逻辑) ---
+// --- AI 策略大脑 ---
+async function askAIForDecision(candles, currentPos) {
+  const last = candles[candles.length - 1], prev = candles[candles.length - 2];
+  const ma5 = calcMA(candles, 5), ma10 = calcMA(candles, 10), ma20 = calcMA(candles, 20);
+  const rsi = calcRSI(candles, 14), atr = calcATR(candles, 14); 
+  const volSurge = last.volume > (prev.volume * 1.5) ? "⚠️成交量异动" : "平稳";
+  const posText = currentPos === 'LONG' ? '多单' : currentPos === 'SHORT' ? '空单' : '空仓';
+
+  const prompt = `你是一个顶级量化交易模型。当前数据: 现价${last.close}, MA5=${ma5.toFixed(2)}, RSI=${rsi.toFixed(1)}, ATR=${atr.toFixed(2)}, ${volSurge}。当前持仓: ${posText}。
+任务:
+【建议方向】：做多 / 做空 / 观望
+【信号风格】：稳健 / 激进
+【预计胜率】：XX%
+(若建议入场，提供 SL, TP1, TP2 点位)
+【操作逻辑】：简述理由。`;
+
+  try {
+    const res = await postJSON("https://api.deepseek.com/chat/completions", {
+      model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.4 
+    }, { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` });
+    return res.choices[0].message.content;
+  } catch (e) { return null; }
+}
+
+// --- 🧠 AI 每日复盘大脑 ---
+async function dailyReflection() {
+  const logs = loadLogs();
+  const today = new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' });
+  const todaysTrades = logs.filter(log => log.entryTime.includes(today) && log.status === 'CLOSED');
+  
+  if (todaysTrades.length === 0) {
+      console.log("今日无已平仓交易，跳过复盘。");
+      return;
+  }
+
+  let tradeSummary = todaysTrades.map(t => 
+      `方向: ${t.action}, 风格: ${t.style}, 入场价: ${t.entryPrice}, 出场价: ${t.exitPrice}, 收益率: ${t.roi}%, 持仓时长: ${t.holdTime}`
+  ).join('\n');
+
+  const prompt = `你是一个不断进化的 AI 交易员。以下是你今天的交易日志记录：
+${tradeSummary}
+
+请进行【每日深夜复盘】：
+1. 总结今日的总体表现（胜率、总体盈亏感悟）。
+2. 分析盈利单：你做对了什么？指标看准了什么？
+3. 反思亏损单：你做错了什么？是被震荡骗了还是格局太小？
+4. 明日优化策略：你打算在明天的分析中注意些什么？
+回复要专业、深刻，像一个真正的基金经理日记。`;
+
+  try {
+    console.log("🧠 正在进行每日深夜复盘...");
+    const res = await postJSON("https://api.deepseek.com/chat/completions", {
+      model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.7 
+    }, { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` });
+    
+    await sendSignalEmail("【AI 每日深度复盘报告】", res.choices[0].message.content, "今日结算", "日记簿");
+    console.log("✅ 复盘报告已发送！");
+  } catch (e) { console.error("复盘失败", e.message); }
+}
+
+// --- 监控主循环 ---
 async function runMonitor() {
-  const time = new Date().toLocaleTimeString();
+  const time = new Date().toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai' });
+  const nowHour = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', hour12: false });
+  const nowMin = new Date().getMinutes();
+
+  // 触发每日复盘 (每天 23:50 到 23:59 之间执行一次)
+  if (nowHour === '23' && nowMin >= 50 && !reflectedToday) {
+      await dailyReflection();
+      reflectedToday = true;
+  }
+  // 凌晨重置复盘标记
+  if (nowHour === '00' && reflectedToday) reflectedToday = false;
+
   try {
     const data = await fetchJSON(`https://api.binance.us/api/v3/klines?symbol=${SYMBOL}&interval=15m&limit=30`);  
     if (!Array.isArray(data)) return;
-
     const candles = data.map(d => ({ open: +d[1], high: +d[2], low: +d[3], close: +d[4], volume: +d[5] }));
     lastPrice = candles[candles.length - 1].close;
 
-    // 告诉 AI 我们现在的仓位，让它做决定
     const aiResponse = await askAIForDecision(candles, currentPosition);
     if (!aiResponse) return;
     
-    // 1. 提取 AI 决定的方向
-    let targetDirection = null;
-    if (aiResponse.includes("做多")) targetDirection = 'LONG';
-    else if (aiResponse.includes("做空")) targetDirection = 'SHORT';
-    else if (aiResponse.includes("观望")) targetDirection = 'WAIT';
+    let targetDir = null;
+    if (aiResponse.includes("做多")) targetDir = 'LONG';
+    else if (aiResponse.includes("做空")) targetDir = 'SHORT';
+    else if (aiResponse.includes("观望")) targetDir = 'WAIT';
+    if (!targetDir) return; 
 
-    if (!targetDirection) return; 
-
-    // 2. 提取胜率和风格
     const isAggressive = aiResponse.includes("激进");
     const winRateMatch = aiResponse.match(/预计胜率[^\d]*(\d+)/);
     const winRate = winRateMatch ? parseInt(winRateMatch[1]) : 0;
 
-    console.log(`[${time}] 🧠 AI思考结果: 方向=${targetDirection}, 风格=${isAggressive?"激进":"稳健"}, 胜率=${winRate}%`);
-
-    // ==========================================
-    // 🛡️ 拦截器与状态机逻辑开始
-    // ==========================================
     let signalToEmail = null;
 
-    // 拦截器 1：完全相同的趋势 -> 拿住不发邮件
-    if (targetDirection === currentPosition) {
-        console.log(`[${time}] 🛡️ 趋势延续，系统已自动拦截重复信号。当前建议：继续拿住。`);
-        return; 
-    }
+    if (targetDir === currentPosition) return; 
 
-    // 拦截器 2：要求观望
-    if (targetDirection === 'WAIT') {
+    if (targetDir === 'WAIT') {
         if (currentPosition !== null) {
-            // 原来有仓位，现在要求观望 -> 发送平仓邮件！
             signalToEmail = `【平仓警报】行情走弱，请立即平仓转为观望`;
-            currentPosition = null; // 更新状态为空仓
-        } else {
-            // 原来就是空仓，现在还是观望 -> 不发邮件
-            console.log(`[${time}] 🛡️ 震荡行情，继续空仓观望，不发邮件。`);
-            return;
-        }
-    } 
-    // 拦截器 3：要求开仓（做多/做空）
-    else {
-        // 🚨 胜率过滤：激进单且胜率低于70%，直接丢弃！
-        if (isAggressive && winRate < 70) {
-            console.log(`[${time}] 🚫 垃圾信号过滤：激进单且胜率 (${winRate}%) 低于 70%，放弃入场！`);
-            return;
-        }
-
-        let actionStr = targetDirection === 'LONG' ? "做多" : "做空";
+            currentPosition = null; 
+        } else return;
+    } else {
+        if (isAggressive && winRate < 70) return;
+        let actionStr = targetDir === 'LONG' ? "做多" : "做空";
         let styleStr = isAggressive ? "激进" : "稳健";
         
-        if (currentPosition === null) {
-            // 原来空仓 -> 正常开仓
-            signalToEmail = `【建仓指令】${styleStr}${actionStr}`;
-        } else {
-            // 原来有多单，现在喊做空 -> 紧急反手
-            signalToEmail = `【紧急反手】请平掉原仓位，立刻反向${styleStr}${actionStr}`;
-        }
+        if (currentPosition === null) signalToEmail = `【建仓指令】${styleStr}${actionStr}`;
+        else signalToEmail = `【紧急反手】请平掉原仓位，立刻反向${styleStr}${actionStr}`;
         
-        currentPosition = targetDirection; // 更新状态为新的方向
+        currentPosition = targetDir; 
+        // 💾 触发交易信号时，写入本地日志！
+        addTradeLog(actionStr, styleStr, lastPrice);
     }
 
-    // 通过了所有层层选拔，才能发邮件给你！
-    if (signalToEmail) {
-        await sendSignalEmail(signalToEmail, aiResponse, lastPrice);
-    }
+    if (signalToEmail) await sendSignalEmail(signalToEmail, aiResponse, lastPrice);
     
-  } catch (e) { console.error("监控循环报错:", e.message); }
+  } catch (e) { console.error("循环报错:", e.message); }
 }
 
-// --- 存活接口 ---
+// --- 🌐 Web 可视化控制台 (用于手动输入平仓价) ---
 http.createServer((req, res) => {
-  if (req.url === '/status') {
-    res.writeHead(200, {'Content-Type': 'application/json'});
-    res.end(JSON.stringify({ status: "alive", position: currentPosition || "空仓" }));
-  } else { res.end("ETH AI Trade Engine is Running"); }
+  // 接口：提供给前端的 API 提交平仓数据
+  if (req.url === '/api/close' && req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => body += chunk.toString());
+      req.on('end', () => {
+          const { id, exitPrice } = JSON.parse(body);
+          const logs = loadLogs();
+          const trade = logs.find(t => t.id === id);
+          if (trade) {
+              trade.exitPrice = parseFloat(exitPrice);
+              trade.exitTime = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+              
+              // 计算持仓时间 (分钟)
+              const mins = Math.round((Date.now() - trade.entryTimestamp) / 60000);
+              trade.holdTime = `${Math.floor(mins / 60)}小时${mins % 60}分钟`;
+              
+              // 计算收益率 ROI
+              let roi = 0;
+              if (trade.action === '做多') roi = ((trade.exitPrice - trade.entryPrice) / trade.entryPrice) * 100;
+              if (trade.action === '做空') roi = ((trade.entryPrice - trade.exitPrice) / trade.entryPrice) * 100;
+              trade.roi = roi.toFixed(2);
+              trade.status = 'CLOSED';
+              saveLogs(logs);
+              res.writeHead(200); res.end(JSON.stringify({success: true}));
+          } else {
+              res.writeHead(400); res.end(JSON.stringify({error: "Trade not found"}));
+          }
+      });
+      return;
+  }
+
+  // 接口：返回 JSON 数据
+  if (req.url === '/api/logs') {
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify(loadLogs().reverse())); // 倒序，最新的在上面
+      return;
+  }
+
+  // 页面：超酷的暗黑风管理后台
+  res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
+  res.end(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>ETH 交易控制台</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; color: #fff; margin: 0; padding: 20px; }
+            .container { max-width: 1000px; margin: auto; background: #1e1e1e; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+            h2 { color: #00d2ff; border-bottom: 1px solid #333; padding-bottom: 10px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { padding: 12px; text-align: center; border-bottom: 1px solid #333; }
+            th { background: #2d2d2d; color: #aaa; }
+            .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+            .bg-green { background: rgba(0, 255, 100, 0.2); color: #00ff64; }
+            .bg-red { background: rgba(255, 50, 50, 0.2); color: #ff3232; }
+            .bg-blue { background: rgba(0, 150, 255, 0.2); color: #0096ff; }
+            input { width: 80px; padding: 6px; background: #333; border: 1px solid #555; color: white; border-radius: 4px; text-align: center; }
+            button { padding: 6px 12px; background: #00d2ff; color: #000; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+            button:hover { background: #00a8cc; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h2>📈 AI 交易日志 & 记账本</h2>
+            <p>当前系统状态: <b>运行中</b> | 市场现价: <b id="currPrice">获取中...</b></p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>入场时间</th>
+                        <th>方向</th>
+                        <th>入场价</th>
+                        <th>状态/平仓价</th>
+                        <th>持仓时长</th>
+                        <th>收益率(ROI)</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="logTable"></tbody>
+            </table>
+        </div>
+        <script>
+            async function loadData() {
+                const res = await fetch('/api/logs');
+                const logs = await res.json();
+                let html = '';
+                logs.forEach(log => {
+                    const isLong = log.action === '做多';
+                    const dirClass = isLong ? 'bg-green' : 'bg-red';
+                    
+                    let exitHtml = '', roiHtml = '-', timeHtml = '-', actionHtml = '';
+                    if (log.status === 'OPEN') {
+                        exitHtml = \`<input type="number" id="exit-\${log.id}" placeholder="输入价格">\`;
+                        actionHtml = \`<button onclick="closeTrade('\${log.id}')">保存平仓</button>\`;
+                    } else {
+                        exitHtml = log.exitPrice;
+                        timeHtml = log.holdTime;
+                        const isProfit = parseFloat(log.roi) > 0;
+                        roiHtml = \`<span class="badge \${isProfit ? 'bg-green' : 'bg-red'}">\${log.roi > 0 ? '+' : ''}\${log.roi}%</span>\`;
+                        actionHtml = '<span class="badge bg-blue">已结算</span>';
+                    }
+
+                    html += \`<tr>
+                        <td>\${log.entryTime.split(' ')[1]}<br><small style="color:#666">\${log.entryTime.split(' ')[0]}</small></td>
+                        <td><span class="badge \${dirClass}">\${log.style} \${log.action}</span></td>
+                        <td>\${log.entryPrice}</td>
+                        <td>\${exitHtml}</td>
+                        <td>\${timeHtml}</td>
+                        <td>\${roiHtml}</td>
+                        <td>\${actionHtml}</td>
+                    </tr>\`;
+                });
+                document.getElementById('logTable').innerHTML = html;
+            }
+
+            async function closeTrade(id) {
+                const exitPrice = document.getElementById('exit-'+id).value;
+                if (!exitPrice) return alert("请输入平仓价！");
+                await fetch('/api/close', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ id, exitPrice })
+                });
+                loadData();
+            }
+            loadData();
+        </script>
+    </body>
+    </html>
+  `);
 }).listen(process.env.PORT || 3000);
 
 // --- 启动自检 ---
 async function startApp() {
-    console.log("🚀 终极防骚扰挂机版启动...");
-    await sendSignalEmail("【系统升级】防骚扰模块激活", "现在系统已经有了仓位记忆！<br>相同的方向它会叫你【拿住】且不发邮件吵你；如果趋势变了，它会发【平仓】或【反手】邮件。<br>并且，所有胜率低于 70% 的激进单已经被彻底封杀屏蔽！", 0);
+    console.log("🚀 日记与复盘系统挂机版启动...");
+    await sendSignalEmail("【系统升级】AI 管理控制台已上线", "你的 AI 已学会反思！<br>请在浏览器打开你的 Render 网址，即可进入可视化面板手动登记平仓。<br>每晚 23:50，系统会自动将当日交易整理发送给 AI 进行深度复盘，并发邮件汇报给你！", 0);
     setInterval(runMonitor, CHECK_INTERVAL_MS);
     runMonitor();
 }
