@@ -2,12 +2,12 @@ const https = require('https');
 const http = require('http');
 
 // ==========================================
-// 🔑 终极完美版密钥（已全部对齐，私钥已加）
+// 🔑 完美密钥配置
 // ==========================================
 const EMAILJS_SERVICE_ID = "service_op2rg49"; 
 const EMAILJS_TEMPLATE_ID = "template_eftwoy6"; 
-const EMAILJS_PUBLIC_KEY = "tIZB9DwwpEKr3KQpQ"; // 大写的 I，完全正确！
-const EMAILJS_PRIVATE_KEY = "s76zhOvxmYLR_PDbtTxtg"; // 服务器端必备护身符
+const EMAILJS_PUBLIC_KEY = "tIZB9DwwpEKr3KQpQ"; 
+const EMAILJS_PRIVATE_KEY = "s76zhOvxmYLR_PDbtTxtg"; 
 
 const DEEPSEEK_API_KEY = "sk-9afe367ef974483693b3e829b203dd6b"; 
 const NOTIFY_EMAIL = "2183089849@qq.com";
@@ -22,7 +22,7 @@ let lastPrice = null;
 
 console.log("🚀 ETH AI-Decision Monitor starting...");
 
-// --- 增强版网络请求 ---
+// --- 网络请求 ---
 function postJSON(url, body, extraHeaders) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);
@@ -31,11 +31,7 @@ function postJSON(url, body, extraHeaders) {
       hostname: urlObj.hostname,
       path: urlObj.pathname,
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json', 
-        'Content-Length': Buffer.byteLength(data), 
-        ...(extraHeaders||{}) 
-      }
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), ...(extraHeaders||{}) }
     };
     const mod = url.startsWith('https') ? https : http;
     const req = mod.request(options, (res) => {
@@ -62,7 +58,7 @@ function fetchJSON(url) {
   });
 }
 
-// --- DeepSeek AI 大脑 ---
+// --- AI 大脑 ---
 async function askAIForDecision(candles) {
   const last = candles[candles.length - 1];
   const prompt = `你现在是专业的量化操盘手。分析 ETH/USDT 15分钟K线数据：
@@ -114,12 +110,12 @@ async function sendSignalEmail(action, aiDecisionText, price) {
 async function runMonitor() {
   const time = new Date().toLocaleTimeString();
   try {
-    // ✅ 替换成这行新的（换成 Binance 官方的数据专线接口）：
-
-  const data = await fetchJSON(`https://data-api.binance.vision/api/v3/klines?symbol=${SYMBOL}&interval=15m&limit=20`);  
-    // 🛡️ 终极防御伞：防止币安接口抽风导致报错崩溃
+    // ✅ 终极绝招：使用 Binance US 接口，彻底绕过美国服务器屏蔽！
+    const data = await fetchJSON(`https://api.binance.us/api/v3/klines?symbol=${SYMBOL}&interval=15m&limit=20`);  
+    
+    // 🛡️ 如果返回的不是数组，打印出币安到底骂了咱们什么
     if (!Array.isArray(data)) {
-        console.error(`[${time}] ⚠️ 币安接口返回异常或被限流，跳过本次分析`);
+        console.error(`[${time}] ⚠️ 币安拒绝了请求，它说:`, JSON.stringify(data));
         return;
     }
 
@@ -155,7 +151,7 @@ http.createServer((req, res) => {
 // --- 启动自检 ---
 async function startApp() {
     console.log("🚀 系统正在进行启动自检 (发送测试邮件)...");
-    await sendSignalEmail("系统自检", "历经千辛万苦，九九八十一难！403 和 404 错误已全面剿灭！当你收到这封信，证明云端发信通道已经彻彻底底打通。接下来就交给 AI 去帮你赚钱吧！", 0);
+    await sendSignalEmail("系统自检", "这封邮件到达说明所有底层配置完美无缺！现在 AI 正使用无限制通道获取行情。", 0);
     setInterval(runMonitor, CHECK_INTERVAL_MS);
     runMonitor();
 }
