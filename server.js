@@ -114,7 +114,8 @@ async function sendSignalEmail(action, aiDecisionText, price) {
 async function runMonitor() {
   const time = new Date().toLocaleTimeString();
   try {
-    const data = await fetchJSON(`https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=15m&limit=20`);
+    // ✅ 替换成这行新的（换成 Binance 官方的数据专线接口）：
+const data = await fetchJSON(`https://data-api.binance.vision/api/v3/klines?symbol=${SYMBOL}&interval=15m&limit=20`);
     
     // 🛡️ 终极防御伞：防止币安接口抽风导致报错崩溃
     if (!Array.isArray(data)) {
