@@ -312,9 +312,4 @@ server.listen(PORT, () => {
   
   checkSignal(); // 启动时立即执行一次
   setInterval(checkSignal, CHECK_INTERVAL_MS);
-  // 强制发信测试 (过5秒自动发)
-setTimeout(() => {
-  console.log("准备发送测试邮件...");
-  sendEmail({label: '🚀 系统连通性测试', reason: '手动触发测试'}, {sl: 2000, tp1: 2500, tp2: 3000}, "如果你收到了这封邮件，说明 Render 服务器、邮件 API 已经 100% 完美连通，坐等自动交易信号吧！");
-}, 5000);
 });
