@@ -2,12 +2,12 @@ const https = require('https');
 const http = require('http');
 
 // ==========================================
-// 🔑 洗刷冤屈的密钥配置区 (大写 I 归位！)
+// 🔑 终极完美版密钥（已全部对齐，私钥已加）
 // ==========================================
 const EMAILJS_SERVICE_ID = "service_op2rg49"; 
 const EMAILJS_TEMPLATE_ID = "template_eftwoy6"; 
-const EMAILJS_PUBLIC_KEY = "tIZB9DwwpEKr3KQpQ"; // 👈 看这里！是大写的 I ！！！
-const EMAILJS_PRIVATE_KEY = "s76zhOvxmYLR_PDbtTxtg"; // 👈 服务器发信必须带的护身符
+const EMAILJS_PUBLIC_KEY = "tIZB9DwwpEKr3KQpQ"; // 大写的 I，完全正确！
+const EMAILJS_PRIVATE_KEY = "s76zhOvxmYLR_PDbtTxtg"; // 服务器端必备护身符
 
 const DEEPSEEK_API_KEY = "sk-9afe367ef974483693b3e829b203dd6b"; 
 const NOTIFY_EMAIL = "2183089849@qq.com";
@@ -22,7 +22,7 @@ let lastPrice = null;
 
 console.log("🚀 ETH AI-Decision Monitor starting...");
 
-// --- 抓错大师：网络请求 ---
+// --- 增强版网络请求 ---
 function postJSON(url, body, extraHeaders) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);
@@ -62,7 +62,7 @@ function fetchJSON(url) {
   });
 }
 
-// --- AI 操盘手 ---
+// --- DeepSeek AI 大脑 ---
 async function askAIForDecision(candles) {
   const last = candles[candles.length - 1];
   const prompt = `你现在是专业的量化操盘手。分析 ETH/USDT 15分钟K线数据：
@@ -95,7 +95,7 @@ async function sendSignalEmail(action, aiDecisionText, price) {
       service_id: EMAILJS_SERVICE_ID,
       template_id: EMAILJS_TEMPLATE_ID,
       user_id: EMAILJS_PUBLIC_KEY, 
-      accessToken: EMAILJS_PRIVATE_KEY, // 有了这个，加上正确的大写I，绝对畅通无阻
+      accessToken: EMAILJS_PRIVATE_KEY, 
       template_params: { 
         to_email: NOTIFY_EMAIL, 
         signal: action, 
@@ -115,6 +115,13 @@ async function runMonitor() {
   const time = new Date().toLocaleTimeString();
   try {
     const data = await fetchJSON(`https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=15m&limit=20`);
+    
+    // 🛡️ 终极防御伞：防止币安接口抽风导致报错崩溃
+    if (!Array.isArray(data)) {
+        console.error(`[${time}] ⚠️ 币安接口返回异常或被限流，跳过本次分析`);
+        return;
+    }
+
     const candles = data.map(d => ({ open: +d[1], high: +d[2], low: +d[3], close: +d[4] }));
     lastPrice = candles[candles.length - 1].close;
 
@@ -147,7 +154,7 @@ http.createServer((req, res) => {
 // --- 启动自检 ---
 async function startApp() {
     console.log("🚀 系统正在进行启动自检 (发送测试邮件)...");
-    await sendSignalEmail("系统自检", "历经千辛万苦，终于战胜了字体陷阱！当你收到这封信，证明云端发信通道已经彻底打通。接下来就交给 AI 去帮你盯盘吧！", 0);
+    await sendSignalEmail("系统自检", "历经千辛万苦，九九八十一难！403 和 404 错误已全面剿灭！当你收到这封信，证明云端发信通道已经彻彻底底打通。接下来就交给 AI 去帮你赚钱吧！", 0);
     setInterval(runMonitor, CHECK_INTERVAL_MS);
     runMonitor();
 }
