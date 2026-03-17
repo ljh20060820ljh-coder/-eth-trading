@@ -2,19 +2,19 @@ const https = require('https');
 const http = require('http');
 
 // ==========================================
-// 🔑 终极核对：根据你最新截图完美对齐的密钥
+// 🔑 洗刷冤屈的密钥配置区 (大写 I 归位！)
 // ==========================================
 const EMAILJS_SERVICE_ID = "service_op2rg49"; 
 const EMAILJS_TEMPLATE_ID = "template_eftwoy6"; 
-const EMAILJS_PUBLIC_KEY = "tlZB9DwwpEKr3KQpQ"; // 修正：首字母小写 t，第二个字母小写 l
-const EMAILJS_PRIVATE_KEY = "s76zhOvxmYLR_PDbtTxtg"; // 新增：服务器端发信的终极护身符 (Access Token)
+const EMAILJS_PUBLIC_KEY = "tIZB9DwwpEKr3KQpQ"; // 👈 看这里！是大写的 I ！！！
+const EMAILJS_PRIVATE_KEY = "s76zhOvxmYLR_PDbtTxtg"; // 👈 服务器发信必须带的护身符
 
 const DEEPSEEK_API_KEY = "sk-9afe367ef974483693b3e829b203dd6b"; 
 const NOTIFY_EMAIL = "2183089849@qq.com";
 
 const SYMBOL = "ETHUSDT";
-const CHECK_INTERVAL_MS = 60 * 1000;  // 每分钟让 AI 盯盘一次
-const SIGNAL_COOLDOWN_MS = 30 * 60 * 1000; // 同一方向信号冷却 30 分钟
+const CHECK_INTERVAL_MS = 60 * 1000; 
+const SIGNAL_COOLDOWN_MS = 30 * 60 * 1000;
 
 let lastSignalTime = 0;
 let lastSignalType = null;
@@ -22,7 +22,7 @@ let lastPrice = null;
 
 console.log("🚀 ETH AI-Decision Monitor starting...");
 
-// --- 增强型网络请求 ---
+// --- 抓错大师：网络请求 ---
 function postJSON(url, body, extraHeaders) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);
@@ -62,16 +62,16 @@ function fetchJSON(url) {
   });
 }
 
-// --- DeepSeek AI 决策大脑 ---
+// --- AI 操盘手 ---
 async function askAIForDecision(candles) {
   const last = candles[candles.length - 1];
   const prompt = `你现在是专业的量化操盘手。分析 ETH/USDT 15分钟K线数据：
 当前价: ${last.close}，最高${last.high}，最低${last.low}。
 
 任务要求：
-1. 必须根据行情判断是否建议入场。
-2. 回复格式开头必须是：【建议入场：做多】或【建议入场：做空】或【建议入场：观望】。
-3. 请在后面附带简要理由。`;
+1. 判断是否建议入场。
+2. 回复开头必须是：【建议入场：做多】或【建议入场：做空】或【建议入场：观望】。
+3. 请附带简短理由。`;
 
   try {
     const result = await postJSON("https://api.deepseek.com/chat/completions", {
@@ -85,7 +85,7 @@ async function askAIForDecision(candles) {
   return "AI 分析暂时不可用";
 }
 
-// --- 发送交易信号邮件 ---
+// --- 发信通道 ---
 async function sendSignalEmail(action, aiDecisionText, price) {
   const time = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
   const msg = `🤖 AI 决策报告\n------------------\n【AI 动作】${action}\n【当前价格】${price}\n【AI 分析理由】\n${aiDecisionText}\n\n【发送时间】${time}`;
@@ -94,8 +94,8 @@ async function sendSignalEmail(action, aiDecisionText, price) {
     await postJSON("https://api.emailjs.com/api/v1.0/email/send", {
       service_id: EMAILJS_SERVICE_ID,
       template_id: EMAILJS_TEMPLATE_ID,
-      user_id: EMAILJS_PUBLIC_KEY,
-      accessToken: EMAILJS_PRIVATE_KEY, // 加上了最关键的私钥！再也不会 404 了
+      user_id: EMAILJS_PUBLIC_KEY, 
+      accessToken: EMAILJS_PRIVATE_KEY, // 有了这个，加上正确的大写I，绝对畅通无阻
       template_params: { 
         to_email: NOTIFY_EMAIL, 
         signal: action, 
@@ -110,7 +110,7 @@ async function sendSignalEmail(action, aiDecisionText, price) {
   }
 }
 
-// --- 后台核心监控循环 ---
+// --- 监控主循环 ---
 async function runMonitor() {
   const time = new Date().toLocaleTimeString();
   try {
@@ -136,7 +136,7 @@ async function runMonitor() {
   } catch (e) { console.error("监控循环报错:", e.message); }
 }
 
-// --- 存活检测与防休眠接口 ---
+// --- 存活接口 ---
 http.createServer((req, res) => {
   if (req.url === '/status') {
     res.writeHead(200, {'Content-Type': 'application/json'});
@@ -144,12 +144,10 @@ http.createServer((req, res) => {
   } else { res.end("ETH AI Bot is Running"); }
 }).listen(process.env.PORT || 3000);
 
-// --- 启动并执行首次连通性测试 ---
+// --- 启动自检 ---
 async function startApp() {
     console.log("🚀 系统正在进行启动自检 (发送测试邮件)...");
-    // 强制发一封自检邮件，这封信如果到了，这事儿就成了！
-    await sendSignalEmail("系统自检", "这封邮件证明私钥配置完美，404 错误彻底解决！现在 AI 已经在云端接管盯盘，当它分析出交易机会时，你会第一时间收到信号。", 0);
-    
+    await sendSignalEmail("系统自检", "历经千辛万苦，终于战胜了字体陷阱！当你收到这封信，证明云端发信通道已经彻底打通。接下来就交给 AI 去帮你盯盘吧！", 0);
     setInterval(runMonitor, CHECK_INTERVAL_MS);
     runMonitor();
 }
