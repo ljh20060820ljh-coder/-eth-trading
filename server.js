@@ -13,7 +13,7 @@ const DEEPSEEK_API_KEY = "sk-9afe367ef974483693b3e829b203dd6b";
 const NOTIFY_EMAIL = "2183089849@qq.com";
 
 const SYMBOL = "ETHUSDT";
-const CHECK_INTERVAL_MS = 60 * 1000; 
+const CHECK_INTERVAL_MS = 5 * 60 * 1000;  
 const SIGNAL_COOLDOWN_MS = 30 * 60 * 1000;
 
 let lastSignalTime = 0;
