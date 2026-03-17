@@ -115,8 +115,8 @@ async function runMonitor() {
   const time = new Date().toLocaleTimeString();
   try {
     // ✅ 替换成这行新的（换成 Binance 官方的数据专线接口）：
-const data = await fetchJSON(`https://data-api.binance.vision/api/v3/klines?symbol=${SYMBOL}&interval=15m&limit=20`);
-    
+
+  const data = await fetchJSON(`https://data-api.binance.vision/api/v3/klines?symbol=${SYMBOL}&interval=15m&limit=20`);  
     // 🛡️ 终极防御伞：防止币安接口抽风导致报错崩溃
     if (!Array.isArray(data)) {
         console.error(`[${time}] ⚠️ 币安接口返回异常或被限流，跳过本次分析`);
