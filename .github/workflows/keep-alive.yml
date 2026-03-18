@@ -1,0 +1,16 @@
+name: Keep Render Awake
+
+# 触发条件：每 5 分钟执行一次
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  # 允许在 GitHub 网页上手动点击运行测试
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 敲门 Render 后台
+        # ⚠️ 这里已经填好了你的 Render 后台监控接口，直接用就行
+        run: curl -s https://eth-trading-1.onrender.com/status
