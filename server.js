@@ -10,7 +10,7 @@ const KV_REST_API_URL = "https://exact-sparrow-75815.upstash.io";
 const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
 const TIMEFRAMES = ["5m", "15m", "1h", "4h"]; 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; 
-const ALERT_CHECK_INTERVAL = 10 * 1000; // 🔥 报警巡逻间隔：10秒
+const ALERT_CHECK_INTERVAL = 10 * 1000; 
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY; 
 const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY;
@@ -23,10 +23,9 @@ let lastPrices = { BTCUSDT: null, ETHUSDT: null, SOLUSDT: null };
 let cachedNews = []; 
 let isMonitoringActive = true; 
 
-// 🔥 纯单机内存模式
 let inMemoryDB = { trade_logs: [], price_alerts: [] };
 
-console.log("🚀 量化 AI (DeepSeek 完整报警版) 已上线...");
+console.log("🚀 量化 AI (DeepSeek 纯血容错版) 已上线...");
 
 function postJSON(url, body, extraHeaders) {
   return new Promise((resolve, reject) => {
@@ -43,7 +42,7 @@ function postJSON(url, body, extraHeaders) {
 
 function fetchJSON(url, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'Crypto-Monitor/14.2', ...extraHeaders } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': 'Crypto-Monitor/14.3', ...extraHeaders } }, (res) => {
       let data = ''; res.on('data', chunk => data += chunk);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } });
     }).on('error', reject);
@@ -88,7 +87,18 @@ async function fetchAndAnalyzeNews() {
         
         let jsonStr = aiRes.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```json/gi, '').replace(/```/g, '').trim();
         cachedNews = JSON.parse(jsonStr).map((item, i) => ({ ...item, link: topNews[i].link }));
-    } catch(e) {}
+        console.log("📰 DeepSeek 新闻翻译完成！");
+    } catch(e) { 
+        console.error("❌ 新闻分析失败 (大概率API被挤爆):", e.message); 
+        // 🔥 核心修复：兜底机制，就算API崩了也不让前端卡死
+        cachedNews = [{
+            date: "实时",
+            title: `DeepSeek API 当前网络拥堵或拒绝响应 (${e.message.substring(0, 25)}...)，系统将在 30 分钟后自动重试。`,
+            sentiment: "API 拥堵",
+            type: "neutral",
+            link: "#"
+        }];
+    }
 }
 
 async function askAIBatchDecisions(batchData) {
@@ -104,10 +114,12 @@ async function askAIBatchDecisions(batchData) {
     }, { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` });
     let jsonStr = res.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```json/gi, '').replace(/```/g, '').trim();
     return JSON.parse(jsonStr);
-  } catch (e) { return []; }
+  } catch (e) { 
+    console.error("❌ 批量分析失败:", e.message); 
+    return []; 
+  }
 }
 
-// 🔥 核心修复：加回每 10 秒巡逻一次的报警引擎！
 async function runAlertEngine() {
     try {
         const alerts = await loadData('price_alerts'); 
@@ -128,7 +140,6 @@ async function runAlertEngine() {
                 const title = `🚨 【价格提醒】触发！`; 
                 const desp = `**币种**: ${alert.symbol || 'ETHUSDT'}\n**当前价格**: ${currentPrice}\n**您的预设**: 价格已${alert.dir === 'above' ? '涨破' : '跌破'} ${alert.price}`;
                 
-                console.log(`🚨 报警已触发: ${alert.symbol} 到达 ${currentPrice}`);
                 await sendWeChatPush(title, desp); 
                 await sendSignalEmail("🚨 价格报警", desp.replace(/\n/g, '<br>'), currentPrice, "实时报警", alert.symbol || 'ETHUSDT');
                 triggered = true;
@@ -210,7 +221,6 @@ http.createServer(async (req, res) => {
   if (req.url === '/api/toggle-monitor' && req.method === 'POST') { isMonitoringActive = !isMonitoringActive; res.writeHead(200); res.end(JSON.stringify({ success: true, isMonitoringActive })); return; }
   if (req.url === '/api/news' && req.method === 'GET') { res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(cachedNews)); return; }
 
-  // 🧪 测试大喇叭是否畅通的专用接口
   if (req.url === '/api/test-signal') {
       sendWeChatPush("【测试通知】", "微信推送功能正常！");
       sendSignalEmail("🔔 邮件测试", "恭喜你，邮件推送功能配置正确，通信顺畅！", 0, "测试", "系统");
@@ -252,7 +262,7 @@ async function startApp() {
     fetchAndAnalyzeNews(); 
     setInterval(fetchAndAnalyzeNews, 30 * 60 * 1000); 
     setInterval(runMonitor, CHECK_INTERVAL_MS); 
-    setInterval(runAlertEngine, ALERT_CHECK_INTERVAL); // 🔥 启动报警巡逻！
+    setInterval(runAlertEngine, ALERT_CHECK_INTERVAL); 
     runMonitor();
 }
 startApp();
