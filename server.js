@@ -2,7 +2,7 @@ const https = require('https');
 const http = require('http');
 
 // ==========================================
-// 🔐 终极配置 (多币种 + 波动率突破特种兵)
+// 🔐 终极配置 (多币种 + 波动率突破特种兵 + 测试后门)
 // ==========================================
 const EMAILJS_SERVICE_ID = "service_op2rg49"; 
 const EMAILJS_TEMPLATE_ID = "template_eftwoy6"; 
@@ -27,7 +27,7 @@ SYMBOLS.forEach(sym => TIMEFRAMES.forEach(tf => positions[`${sym}_${tf}`] = null
 let lastPrices = { BTCUSDT: null, ETHUSDT: null, SOLUSDT: null };
 let reflectedToday = false; 
 
-console.log("🚀 量化 AI (特种兵突破矩阵 + 全天候警报) 已上线...");
+console.log("🚀 量化 AI (特种兵突破矩阵 + 全天候警报 + 测试通道) 已上线...");
 
 // --- 网络请求核心 ---
 function postJSON(url, body, extraHeaders) {
@@ -181,7 +181,23 @@ async function runMonitor() {
 http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, DELETE'); res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
+  
   if (req.url === '/status') { res.writeHead(200); res.end(JSON.stringify({ status: "alive" })); return; }
+
+  // 🟢 隐藏后门：专门用于测试 AI 交易信号推送
+  if (req.url === '/api/test-signal') {
+      const testHtml = `<b>【操作逻辑】(测试级别)</b><br>收到主人的最高指令，正在进行系统全链路通信测试。特种兵雷达运转正常！<br><br><b>【风控点位】</b><br>🛑 止损: 2000<br>🎯 TP1: 3000<br>🎯 TP2: 3500<br>📊 胜率: 99%`;
+      const testWechat = `分析周期: 5m\n币种: ETHUSDT\n价格: 2500.00\n逻辑: 收到主人的最高指令，正在进行系统全链路通信测试。特种兵雷达运转正常！\n\n🛑 止损: 2000\n🎯 止盈: 3000 / 3500\n📊 预计胜率: 99%`;
+      
+      // 触发发信
+      sendSignalEmail("【建仓指令】★ 激进做多 [5m]", testHtml, 2500, "5m K线", "ETHUSDT");
+      sendWeChatPush("【建仓指令】★ 激进做多 ETH(5m)", testWechat);
+      
+      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
+      res.end("<h2 style='color:green; text-align:center; margin-top:50px;'>✅ 发射成功！<br>系统已模拟 AI 交易信号，请立刻检查您的微信和邮箱！</h2>");
+      return;
+  }
+
   if (req.url === '/api/close' && req.method === 'POST') {
       let body = ''; req.on('data', c => body += c.toString());
       req.on('end', async () => {
