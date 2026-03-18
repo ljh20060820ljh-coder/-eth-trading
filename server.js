@@ -2,7 +2,7 @@ const https = require('https');
 const http = require('http');
 
 // ==========================================
-// 🔐 终极配置 (多币种 + 特种兵 + AI 新闻主编)
+// 🔐 终极配置 (Gemini 引擎 + 特种兵 + AI 主编)
 // ==========================================
 const EMAILJS_SERVICE_ID = "service_op2rg49"; 
 const EMAILJS_TEMPLATE_ID = "template_eftwoy6"; 
@@ -15,7 +15,8 @@ const TIMEFRAMES = ["5m", "15m", "1h", "4h"];
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; 
 const ALERT_CHECK_INTERVAL = 10 * 1000;  
 
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY; 
+// 🔥 核心换芯：使用 Gemini API Key
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY; 
 const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY;
 const KV_REST_API_TOKEN = process.env.KV_REST_API_TOKEN;
 const SERVERCHAN_SENDKEY = process.env.SERVERCHAN_SENDKEY; 
@@ -25,9 +26,9 @@ SYMBOLS.forEach(sym => TIMEFRAMES.forEach(tf => positions[`${sym}_${tf}`] = null
 
 let lastPrices = { BTCUSDT: null, ETHUSDT: null, SOLUSDT: null };
 let reflectedToday = false; 
-let cachedNews = []; // 🔥 存放 AI 翻译后的新闻
+let cachedNews = []; 
 
-console.log("🚀 量化 AI (特种兵矩阵 + AI 资讯主编) 已上线...");
+console.log("🚀 量化 AI (已搭载 Gemini 旗舰引擎) 已上线...");
 
 // --- 网络请求核心 ---
 function postJSON(url, body, extraHeaders) {
@@ -45,7 +46,7 @@ function postJSON(url, body, extraHeaders) {
 
 function fetchJSON(url, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'Crypto-Monitor/12.0', ...extraHeaders } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': 'Crypto-Monitor/12.1', ...extraHeaders } }, (res) => {
       let data = ''; res.on('data', chunk => data += chunk);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } });
     }).on('error', reject);
@@ -67,9 +68,9 @@ function calcMA(data, period) { if (data.length < period) return 0; return data.
 function calcRSI(data, period = 14) { if (data.length < period + 1) return 50; let gains = 0, losses = 0; for (let i = data.length - period; i < data.length; i++) { const diff = data[i].close - data[i-1].close; if (diff > 0) gains += diff; else losses -= diff; } const avgLoss = losses / period; if (avgLoss === 0) return 100; return 100 - (100 / (1 + (gains / period) / avgLoss)); }
 function calcATR(data, period = 14) { if (data.length < period + 1) return 0; let sumTR = 0; for (let i = data.length - period; i < data.length; i++) { const high = data[i].high, low = data[i].low, prevClose = data[i-1].close; sumTR += Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)); } return sumTR / period; }
 
-// --- 🌍 新增：AI 全球资讯翻译与情绪引擎 ---
+// --- 🌍 Gemini AI 新闻主编 ---
 async function fetchAndAnalyzeNews() {
-    if (!DEEPSEEK_API_KEY) return;
+    if (!GEMINI_API_KEY) return;
     try {
         const res = await fetchJSON('https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Fcointelegraph.com%2Frss');
         if (!res || !res.items) return;
@@ -85,20 +86,22 @@ async function fetchAndAnalyzeNews() {
 3. type：只能是 "bull"(绿字利好), "bear"(红字利空), "neutral"(灰字中性)。
 英文新闻：\n${topNews.map(n => n.pubDate + ' | ' + n.title).join('\n')}`;
 
-        const aiRes = await postJSON("https://api.deepseek.com/chat/completions", {
-            model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.3 
-        }, { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` });
+        // 🔥 使用 Gemini REST API
+        const aiRes = await postJSON(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.3 }
+        });
         
-        let jsonStr = aiRes.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```json/g, '').replace(/```/g, '').trim();
+        let jsonStr = aiRes.candidates[0].content.parts[0].text.replace(/```json/g, '').replace(/```/g, '').trim();
         let parsed = JSON.parse(jsonStr);
         cachedNews = parsed.map((item, i) => ({ ...item, link: topNews[i].link }));
-        console.log("📰 AI 资讯情绪分析已更新");
-    } catch(e) { console.error("资讯 AI 分析失败:", e.message); }
+        console.log("📰 Gemini 资讯情绪分析已更新");
+    } catch(e) { console.error("Gemini 资讯分析失败:", e.message); }
 }
 
-// --- 🧠 AI 交易大脑 ---
+// --- 🧠 Gemini 交易大脑 ---
 async function askAIForDecision(symbol, timeframe, confirmedCandles, livePrice, currentPos) {
-  if (!DEEPSEEK_API_KEY) return null;
+  if (!GEMINI_API_KEY) return null;
   const lastClosed = confirmedCandles[confirmedCandles.length - 1];
   const ma5 = calcMA(confirmedCandles, 5), ma10 = calcMA(confirmedCandles, 10), ma20 = calcMA(confirmedCandles, 20);
   const rsi = calcRSI(confirmedCandles, 14), atr = calcATR(confirmedCandles, 14); 
@@ -109,15 +112,19 @@ async function askAIForDecision(symbol, timeframe, confirmedCandles, livePrice, 
   const isBreakout = Math.abs(priceDev) > atrThreshold;
   const surgeAlert = isBreakout ? `🚨【极速突破警告】现价偏离超 1.5倍 ATR (${atrThreshold.toFixed(2)})！` : `正常波动`;
 
-  const prompt = `顶级量化模型。分析: ${symbol} ${timeframe}K线。
+  const prompt = `你是顶级量化模型。分析: ${symbol} ${timeframe}K线。
 【上根收盘】: MA5=${ma5.toFixed(2)}, RSI=${rsi.toFixed(1)}, ATR=${atr.toFixed(2)}。
 【当前现价】: ${livePrice}。当前持仓: ${posText}。雷达: ${surgeAlert}
 如果是极速突破可给 "AGGRESSIVE"，否则按正常均线给 "STEADY" 或 "WAIT"。
-严格回复 JSON: {"direction": "WAIT", "style": "STEADY", "win_rate": 0, "sl": 0, "tp1": 0, "tp2": 0, "reason": "分析逻辑"}`;
+严格回复 JSON (不要加markdown): {"direction": "WAIT", "style": "STEADY", "win_rate": 0, "sl": 0, "tp1": 0, "tp2": 0, "reason": "分析逻辑"}`;
 
   try {
-    const res = await postJSON("https://api.deepseek.com/chat/completions", { model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.2 }, { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` });
-    return res.choices[0].message.content;
+    // 🔥 使用 Gemini REST API
+    const res = await postJSON(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.2 }
+    });
+    return res.candidates[0].content.parts[0].text;
   } catch (e) { return null; }
 }
 
@@ -157,7 +164,7 @@ async function runMonitor() {
             if (!aiResponse) continue;
             
             let aiObj;
-            try { aiObj = JSON.parse(aiResponse.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```json/g, '').replace(/```/g, '').trim()); } catch(e) { continue; }
+            try { aiObj = JSON.parse(aiResponse.replace(/```json/g, '').replace(/```/g, '').trim()); } catch(e) { continue; }
 
             const targetDir = aiObj.direction ? aiObj.direction.toUpperCase() : 'WAIT';
             const isAggressive = aiObj.style ? aiObj.style.toUpperCase() === 'AGGRESSIVE' : false;
@@ -169,8 +176,8 @@ async function runMonitor() {
             if (targetDir === 'WAIT') {
                 if (positions[posKey] !== null) { signalTitle = `【平仓警报】`; positions[posKey] = null; } else continue;
             } else {
-                if (isAggressive && winRate < 70) continue;
-                if (positions[posKey] === null) signalTitle = `【建仓指令】${styleStr}${actionStr}`; else signalTitle = `【紧急反手】${styleStr}${actionStr}`;
+                if (isAggressive && winRate < 55) continue; // 及格线设为 55
+                if (positions[posKey] === null) signalTitle = `【Gemini 指令】${styleStr}${actionStr}`; else signalTitle = `【Gemini 反手】${styleStr}${actionStr}`;
                 positions[posKey] = targetDir; 
                 await addTradeLog(symbol, timeframe, actionStr, styleStr, lastPrices[symbol]); 
             }
@@ -197,14 +204,13 @@ http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
   if (req.url === '/status') { res.writeHead(200); res.end(JSON.stringify({ status: "alive" })); return; }
   
-  // 📰 提供 AI 新闻接口给前端
   if (req.url === '/api/news' && req.method === 'GET') { res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(cachedNews)); return; }
 
   if (req.url === '/api/test-signal') {
-      const testHtml = `<b>【操作逻辑】(测试级别)</b><br>收到最高指令，全链路通信正常！<br><br><b>【风控点位】</b><br>🛑 止损: 2000<br>🎯 止盈: 3000<br>📊 胜率: 99%`;
-      const testWechat = `测试正常\n币种: ETHUSDT\n逻辑: 通信测试，请忽略。\n\n🛑 止损: 2000\n🎯 止盈: 3000\n📊 预计胜率: 99%`;
-      sendSignalEmail("【建仓指令】★ 激进做多 [5m]", testHtml, 2500, "5m K线", "ETHUSDT"); sendWeChatPush("【建仓指令】测试", testWechat);
-      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'}); res.end("<h2 style='color:green;text-align:center'>✅ 发射成功！</h2>"); return;
+      const testHtml = `<b>【操作逻辑】(测试级别)</b><br>Gemini 大脑对接成功！通信测试正常！<br><br><b>【风控点位】</b><br>🛑 止损: 2000<br>🎯 止盈: 3000<br>📊 胜率: 99%`;
+      const testWechat = `Gemini 测试正常\n币种: ETHUSDT\n逻辑: 通信测试，请忽略。\n\n🛑 止损: 2000\n🎯 止盈: 3000\n📊 预计胜率: 99%`;
+      sendSignalEmail("【Gemini 测试】★ 激进做多 [5m]", testHtml, 2500, "5m K线", "ETHUSDT"); sendWeChatPush("【Gemini 测试】", testWechat);
+      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'}); res.end("<h2 style='color:green;text-align:center'>✅ Gemini 发射成功！</h2>"); return;
   }
   if (req.url === '/api/close' && req.method === 'POST') {
       let body = ''; req.on('data', c => body += c.toString());
@@ -238,9 +244,9 @@ http.createServer(async (req, res) => {
 }).listen(process.env.PORT || 3000);
 
 async function startApp() {
-    console.log("🚀 启动！AI 主编已挂载！");
+    console.log("🚀 启动！Gemini 核心已挂载！");
     fetchAndAnalyzeNews(); // 启动时抓一次新闻
-    setInterval(fetchAndAnalyzeNews, 30 * 60 * 1000); // 每半小时翻译分析一次新闻！
+    setInterval(fetchAndAnalyzeNews, 30 * 60 * 1000); 
     setInterval(runMonitor, CHECK_INTERVAL_MS); 
     setInterval(runAlertEngine, ALERT_CHECK_INTERVAL); 
     runMonitor();
