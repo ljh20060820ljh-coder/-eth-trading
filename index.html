@@ -240,7 +240,7 @@ function showPage(name, btn) {
 }
 
 // ==========================================
-// ☁️ 云端报警、AI日志等功能 (独立运行区)
+// ☁️ 云端报警、AI日志等功能
 // ==========================================
 async function fetchBackendAlerts() {
     try {
@@ -323,13 +323,13 @@ async function submitCloseTrade(id) {
 }
 
 // ==========================================
-// 📈 TradingView 防弹版图表引擎 (带北京时间和 MA20)
+// 📈 TradingView 图表引擎
 // ==========================================
 let tvChart = null;
 let candleSeries = null;
 let ma5Series = null;
 let ma10Series = null;
-let ma20Series = null; // 🔥 新增 MA20
+let ma20Series = null; 
 let currentInterval = "15m";
 
 function initTradingView() {
@@ -346,7 +346,7 @@ function initTradingView() {
     candleSeries = tvChart.addCandlestickSeries({ upColor: '#00e676', downColor: '#ff1744', borderUpColor: '#00e676', borderDownColor: '#ff1744', wickUpColor: '#00e676', wickDownColor: '#ff1744' });
     ma5Series = tvChart.addLineSeries({ color: '#f0b429', lineWidth: 2, crosshairMarkerVisible: false, priceLineVisible: false });
     ma10Series = tvChart.addLineSeries({ color: '#ff6b9d', lineWidth: 2, crosshairMarkerVisible: false, priceLineVisible: false });
-    ma20Series = tvChart.addLineSeries({ color: '#00cfff', lineWidth: 2, crosshairMarkerVisible: false, priceLineVisible: false }); // 🔥 添加冰蓝 MA20
+    ma20Series = tvChart.addLineSeries({ color: '#00cfff', lineWidth: 2, crosshairMarkerVisible: false, priceLineVisible: false }); 
 
     new ResizeObserver(entries => {
         if (entries.length === 0 || entries[0].target !== chartContainer) return;
@@ -379,15 +379,15 @@ async function fetchAndRenderChart(interval) {
         candleSeries.setData(tvData);
         ma5Series.setData(calculateSMA(tvData, 5));
         ma10Series.setData(calculateSMA(tvData, 10));
-        ma20Series.setData(calculateSMA(tvData, 20)); // 🔥 给图表喂 MA20 数据
+        ma20Series.setData(calculateSMA(tvData, 20)); 
 
         const ma5Data = calculateSMA(tvData, 5); 
         const ma10Data = calculateSMA(tvData, 10);
-        const ma20Data = calculateSMA(tvData, 20); // 🔥 计算最新 MA20 供下方显示
+        const ma20Data = calculateSMA(tvData, 20); 
         
         if(ma5Data.length > 0) document.getElementById('ma5').textContent = ma5Data[ma5Data.length-1].value.toFixed(2);
         if(ma10Data.length > 0) document.getElementById('ma10').textContent = ma10Data[ma10Data.length-1].value.toFixed(2);
-        if(ma20Data.length > 0) document.getElementById('ma20').textContent = ma20Data[ma20Data.length-1].value.toFixed(2); // 🔥 更新冰蓝 MA20 数值
+        if(ma20Data.length > 0) document.getElementById('ma20').textContent = ma20Data[ma20Data.length-1].value.toFixed(2); 
         
         const currentRsi = calcRSI(tvData, 14);
         document.getElementById('rsiVal').textContent = currentRsi.toFixed(1);
@@ -479,27 +479,31 @@ async function fetchCorrelation() {
 
 async function fetchFearGreed() { try { var res = await fetch("https://api.alternative.me/fng/?limit=1"); var data = await res.json(); var val = +data.data[0].value, txt = data.data[0].value_classification; var el = document.getElementById('fgValue'); el.textContent = val; el.style.color = val<25?'#ff1744':val<45?'#ff9800':val<55?'#ffeb3b':val<75?'#8bc34a':'#00e676'; document.getElementById('fgText').textContent = txt; document.getElementById('fgNeedle').style.left = val+'%'; document.getElementById('fgAdvice').textContent = val<20?"极度恐慌通常是买入机会":val>80?"极度贪婪需警惕":"情绪正常"; } catch(e) {} }
 
+// 🔥 终极防拦截新闻 API：使用 RSS2JSON 穿透获取 CoinTelegraph 全球头条
 async function loadNews() { 
     try {
-        const res = await fetch('https://min-api.cryptocompare.com/data/v2/news/?lang=EN');
+        const res = await fetch('https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Fcointelegraph.com%2Frss');
         const data = await res.json();
-        const newsArray = data.Data.slice(0, 8); 
+        if(data.status !== 'ok') throw new Error("API error");
+        
+        const newsArray = data.items.slice(0, 8); 
         
         document.getElementById('newsList').innerHTML = newsArray.map(n => {
-            const time = new Date(n.published_on * 1000).toLocaleTimeString('zh-CN', {hour: '2-digit', minute:'2-digit'});
+            // 提取 hh:mm 格式时间
+            const time = n.pubDate.substring(11, 16);
             return `
             <div class="news-item">
                 <div class="news-header">
-                    <span class="tag" style="background:rgba(255,255,255,0.08);color:var(--dim);">${n.source}</span>
+                    <span class="tag" style="background:rgba(255,255,255,0.08);color:var(--dim);">CoinTelegraph</span>
                     <span class="news-time">${time} 发布</span>
                 </div>
                 <div class="news-title">
-                    <a href="${n.url}" target="_blank" style="color:var(--text);text-decoration:none;">${n.title}</a>
+                    <a href="${n.link}" target="_blank" style="color:var(--text);text-decoration:none;">${n.title}</a>
                 </div>
             </div>`;
         }).join('');
     } catch(e) {
-        document.getElementById('newsList').innerHTML = '<div style="color:red;font-size:12px;">新闻网络连接失败</div>';
+        document.getElementById('newsList').innerHTML = '<div style="color:red;font-size:12px;">新闻网络连接失败，请检查网络或刷新重试。</div>';
     }
 }
 
