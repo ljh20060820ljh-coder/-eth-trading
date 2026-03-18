@@ -3,30 +3,27 @@ const http = require('http');
 const fs = require('fs');
 
 // ==========================================
-// 🔑 完美密钥配置
+// 🔐 终极安全配置 (环境变量提取)
 // ==========================================
+// 非私密配置（公开没关系）
 const EMAILJS_SERVICE_ID = "service_op2rg49"; 
 const EMAILJS_TEMPLATE_ID = "template_eftwoy6"; 
 const EMAILJS_PUBLIC_KEY = "tIZB9DwwpEKr3KQpQ"; 
-const EMAILJS_PRIVATE_KEY = "s76zhOvxmYLR_PDbtTxtg"; 
-
-const DEEPSEEK_API_KEY = "sk-9afe367ef974483693b3e829b203dd6b"; 
 const NOTIFY_EMAIL = "2183089849@qq.com";
-
 const SYMBOL = "ETHUSDT";
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; 
-
-// ==========================================
-// 💾 Upstash Redis 云端数据库配置 (永久记忆)
-// ==========================================
 const KV_REST_API_URL = "https://exact-sparrow-75815.upstash.io"; 
-const KV_REST_API_TOKEN = "gQAAAAAAASgnAAIncDIwNDI1YTkzZjJjNzg0YTIwYTI5MGU0OThjMzk4ZDE3ZXAyNzU4MTU";
+
+// 🚨 核心私密配置（自动从 Render 后台保险箱读取）
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY; 
+const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY;
+const KV_REST_API_TOKEN = process.env.KV_REST_API_TOKEN;
 
 let currentPosition = null; 
 let lastPrice = null;
 let reflectedToday = false; 
 
-console.log("🚀 ETH 量化 AI (云数据库记忆版) 已上线...");
+console.log("🚀 ETH 量化 AI (终极安全版) 已上线...");
 
 // --- 网络请求增强版 (支持数据库请求) ---
 function postJSON(url, body, extraHeaders) {
@@ -50,7 +47,7 @@ function postJSON(url, body, extraHeaders) {
 
 function fetchJSON(url, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'ETH-Monitor/7.0', ...extraHeaders } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': 'ETH-Monitor/8.0', ...extraHeaders } }, (res) => {
       let data = ''; res.on('data', chunk => data += chunk);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } });
     }).on('error', reject);
@@ -59,7 +56,7 @@ function fetchJSON(url, extraHeaders = {}) {
 
 // --- 🧠 核心升级：直连 Upstash 云数据库 ---
 async function loadLogs() {
-  if (!KV_REST_API_URL || KV_REST_API_URL.includes("填入")) return [];
+  if (!KV_REST_API_URL || !KV_REST_API_TOKEN) return [];
   try {
       const res = await fetchJSON(`${KV_REST_API_URL}/get/trade_logs`, { Authorization: `Bearer ${KV_REST_API_TOKEN}` });
       if (res.result) return typeof res.result === 'string' ? JSON.parse(res.result) : res.result;
@@ -68,7 +65,7 @@ async function loadLogs() {
 }
 
 async function saveLogs(logs) {
-  if (!KV_REST_API_URL || KV_REST_API_URL.includes("填入")) return;
+  if (!KV_REST_API_URL || !KV_REST_API_TOKEN) return;
   try {
       await postJSON(`${KV_REST_API_URL}/set/trade_logs`, logs, { Authorization: `Bearer ${KV_REST_API_TOKEN}` });
   } catch (e) { console.error("写入云数据库失败:", e.message); }
@@ -126,6 +123,7 @@ async function sendSignalEmail(action, messageHtml, price, titleStr) {
 
 // --- 🧠 AI JSON 策略大脑 ---
 async function askAIForDecision(confirmedCandles, livePrice, currentPos) {
+  if (!DEEPSEEK_API_KEY) { console.error("缺少 DeepSeek API Key"); return null; }
   const lastClosed = confirmedCandles[confirmedCandles.length - 1];
   const prevClosed = confirmedCandles[confirmedCandles.length - 2];
   const ma5 = calcMA(confirmedCandles, 5), ma10 = calcMA(confirmedCandles, 10), ma20 = calcMA(confirmedCandles, 20);
@@ -273,6 +271,7 @@ http.createServer(async (req, res) => {
 // --- 启动自检 ---
 async function startApp() {
     console.log("🚀 系统启动，云端永久记忆数据库挂载完成！");
+    if (!DEEPSEEK_API_KEY) console.log("⚠️ 警告：未检测到 DEEPSEEK_API_KEY 环境变量！");
     setInterval(runMonitor, CHECK_INTERVAL_MS);
     runMonitor();
 }
