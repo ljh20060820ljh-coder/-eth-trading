@@ -21,7 +21,7 @@ let currentPosition = null;
 let lastPrice = null;
 let reflectedToday = false; 
 
-console.log("🚀 ETH 顶级量化 AI (JSON强解析内核 + CORS跨域开启) 已上线...");
+console.log("🚀 ETH 顶级量化 AI (已剥离未来函数 + CORS) 已上线...");
 
 // --- 日志读写系统 ---
 function loadLogs() {
@@ -72,7 +72,7 @@ function postJSON(url, body, extraHeaders) {
 
 function fetchJSON(url) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'ETH-Monitor/5.0' } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': 'ETH-Monitor/6.0' } }, (res) => {
       let data = ''; res.on('data', chunk => data += chunk);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } });
     }).on('error', reject);
@@ -120,16 +120,35 @@ async function sendSignalEmail(action, messageHtml, price, titleStr) {
   } catch (e) { console.error(`[${time}] ❌ 发信失败: ${e.message}`); }
 }
 
-// --- 🧠 AI JSON 策略大脑 ---
-async function askAIForDecision(candles, currentPos) {
-  const last = candles[candles.length - 1], prev = candles[candles.length - 2];
-  const ma5 = calcMA(candles, 5), ma10 = calcMA(candles, 10), ma20 = calcMA(candles, 20);
-  const rsi = calcRSI(candles, 14), atr = calcATR(candles, 14); 
-  const volSurge = last.volume > (prev.volume * 1.5) ? "⚠️成交量异动" : "平稳";
+// --- 🧠 AI JSON 策略大脑 (无未来函数版) ---
+async function askAIForDecision(confirmedCandles, livePrice, currentPos) {
+  // ⚠️ 核心修复：只看已经收盘的确定的 K 线
+  const lastClosed = confirmedCandles[confirmedCandles.length - 1];
+  const prevClosed = confirmedCandles[confirmedCandles.length - 2];
+  
+  const ma5 = calcMA(confirmedCandles, 5);
+  const ma10 = calcMA(confirmedCandles, 10);
+  const ma20 = calcMA(confirmedCandles, 20);
+  const rsi = calcRSI(confirmedCandles, 14);
+  const atr = calcATR(confirmedCandles, 14); 
+  
+  const volSurge = lastClosed.volume > (prevClosed.volume * 1.5) ? "⚠️上一根K线成交量异常放大" : "成交量平稳";
   const posText = currentPos === 'LONG' ? '多单' : currentPos === 'SHORT' ? '空单' : '空仓';
 
-  const prompt = `你是一个顶级量化交易模型。当前数据: 现价${last.close}, MA5=${ma5.toFixed(2)}, RSI=${rsi.toFixed(1)}, ATR=${atr.toFixed(2)}, ${volSurge}。当前持仓: ${posText}。
+  // 告诉 AI 什么是“已收盘”，什么是“当前跳动”
+  const prompt = `你是一个顶级量化交易模型。
 
+【已收盘定型的技术面】(基于上一个15分钟完整K线)：
+- 均线状态: MA5=${ma5.toFixed(2)}, MA10=${ma10.toFixed(2)}, MA20=${ma20.toFixed(2)}
+- 相对强弱 RSI(14): ${rsi.toFixed(1)}
+- 真实波动率 ATR(14): ${atr.toFixed(2)}
+- 资金动向: ${volSurge} (收盘价: ${lastClosed.close}, 最高: ${lastClosed.high}, 最低: ${lastClosed.low})
+
+【当前盘口异动】(实时秒级数据)：
+- 实时现价: ${livePrice}
+- 当前持仓状态: ${posText}
+
+【任务】：结合坚固的收盘指标和当前的盘口价格，判断是否突破或跌破。
 【强制要求】：你必须且只能回复一个合法的 JSON 对象，不要输出任何其他解释文字！格式严格如下：
 {
   "direction": "WAIT", // 只能填 LONG(做多), SHORT(做空), 或 WAIT(观望)
@@ -182,12 +201,18 @@ async function runMonitor() {
   if (nowHour === '00' && reflectedToday) reflectedToday = false;
 
   try {
+    // 拉取 30 根 K 线
     const data = await fetchJSON(`https://api.binance.us/api/v3/klines?symbol=${SYMBOL}&interval=15m&limit=30`);  
     if (!Array.isArray(data)) return;
+    
     const candles = data.map(d => ({ open: +d[1], high: +d[2], low: +d[3], close: +d[4], volume: +d[5] }));
+    
+    // ⚠️ 终极剥离：提取当前实时价格，并将尚未走完的最后一根K线剔除！
     lastPrice = candles[candles.length - 1].close;
+    const confirmedCandles = candles.slice(0, -1); // 丢弃最后一根，保留前面 29 根确定的
 
-    const aiResponse = await askAIForDecision(candles, currentPosition);
+    // 传入确定的历史和当前跳动的价格
+    const aiResponse = await askAIForDecision(confirmedCandles, lastPrice, currentPosition);
     if (!aiResponse) return;
     
     let aiObj;
@@ -241,7 +266,6 @@ async function runMonitor() {
 
 // --- 🌐 Web 可视化控制台 (已开启 CORS 跨域) ---
 http.createServer((req, res) => {
-  // ⚡️ 核心：允许 Vercel 前端跨域访问数据
   res.setHeader('Access-Control-Allow-Origin', '*'); 
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -285,7 +309,7 @@ http.createServer((req, res) => {
 
 // --- 启动自检 ---
 async function startApp() {
-    console.log("🚀 系统启动完成，CORS跨域已开启。");
+    console.log("🚀 系统启动完成，未来函数已剥离。");
     setInterval(runMonitor, CHECK_INTERVAL_MS);
     runMonitor();
 }
