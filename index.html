@@ -37,7 +37,6 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 .change-badge.up{color:var(--green);background:rgba(0,230,118,0.1);}
 .change-badge.down{color:var(--red);background:rgba(255,23,68,0.1);}
 
-/* 🔥 新增休眠开关样式 */
 .switch-btn { padding: 8px 16px; border-radius: 6px; border: none; font-family: 'Share Tech Mono', monospace; font-size: 13px; font-weight: bold; cursor: pointer; transition: all 0.3s; margin-top: 10px; width: 100%; }
 .switch-btn.active { background: rgba(0,230,118,0.2); color: var(--green); border: 1px solid var(--green); }
 .switch-btn.sleeping { background: rgba(255,23,68,0.2); color: var(--red); border: 1px solid var(--red); }
@@ -179,7 +178,7 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
   <div class="section-title">📅 未来宏观大事件预告</div>
   <div class="panel" id="eventList"></div>
   <div class="section-title">🧠 Gemini AI 全球头条情绪解析</div>
-  <div class="panel" id="newsList"><div style="color:var(--dim);font-size:12px;">Gemini 正在搜集翻译情报，请稍候...</div></div>
+  <div class="panel" id="newsList"><div style="color:var(--dim);font-size:12px;">Gemini 正在搜集翻译情报，请确保后台 API 秘钥填写正确...</div></div>
 </div>
 
 <div class="page" id="page-tools">
@@ -244,7 +243,7 @@ function showPage(name, btn) {
   if(name === 'news') loadAINews(); 
 }
 
-// 🔥 新增：请求与控制后端睡眠状态
+// --- 睡眠开关 ---
 async function fetchMonitorStatus() {
     try {
         const res = await fetch(`${SERVER_URL}/status`);
@@ -275,9 +274,6 @@ function updateSwitchUI(isActive) {
     }
 }
 
-// ==========================================
-// 云端报警与其余逻辑 (省略大部分不变代码)
-// ==========================================
 async function fetchBackendAlerts() {
     try {
         const res = await fetch(`${SERVER_URL}/api/alerts`);
@@ -334,13 +330,47 @@ let theCurrentPrice=2100;
 async function fetchTicker(){ try{ var tk=await(await fetch("https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT")).json(); theCurrentPrice=+tk.lastPrice; document.getElementById('priceDisplay').textContent=theCurrentPrice.toLocaleString('en-US',{minimumFractionDigits:2}); let c=+tk.priceChangePercent, u=c>=0; document.getElementById('changeBadge').className='change-badge '+(u?'up':'down'); document.getElementById('changeBadge').textContent=(u?'▲ ':'▼ ')+Math.abs(c).toFixed(2)+'%'; document.getElementById('high24').textContent=(+tk.highPrice).toFixed(2); document.getElementById('low24').textContent=(+tk.lowPrice).toFixed(2); let v=+tk.volume; document.getElementById('vol24').textContent=v>1000?(v/1000).toFixed(1)+'K':v.toFixed(0); }catch(e){} }
 async function fetchDominance(){ try{ var d=await(await fetch("https://api.coinlore.net/api/global/")).json(); var b=(+d[0].btc_d).toFixed(1), e=(+d[0].eth_d).toFixed(1), o=(100-b-e).toFixed(1); document.getElementById('btcDom').textContent=b+'%'; document.getElementById('ethDom').textContent=e+'%'; document.getElementById('otherDom').textContent=o+'%'; document.getElementById('btcDomBar').style.width=b+'%'; document.getElementById('ethDomBar').style.width=e+'%'; document.getElementById('otherDomBar').style.width=o+'%'; }catch(e){} }
 async function fetchCorrelation() { try { const [br, er] = await Promise.all([fetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=30"), fetch("https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1h&limit=30")]); const btcData = await br.json(); const ethData = await er.json(); const btcC = btcData.map(d=>+d[4]); const ethC = ethData.map(d=>+d[4]); const ethR=[], btcR=[]; for(let i=1; i<btcC.length; i++){ethR.push((ethC[i]-ethC[i-1])/ethC[i-1]); btcR.push((btcC[i]-btcC[i-1])/btcC[i-1]);} const avgE=ethR.reduce((a,b)=>a+b,0)/ethR.length, avgB=btcR.reduce((a,b)=>a+b,0)/btcR.length; let num=0, de=0, db=0; for(let i=0; i<ethR.length; i++){num += (ethR[i]-avgE)*(btcR[i]-avgB); de += Math.pow(ethR[i]-avgE,2); db += Math.pow(btcR[i]-avgB,2);} const corr = num/Math.sqrt(de*db); const el = document.getElementById('corrValue'); el.textContent = corr.toFixed(2); el.style.color = corr>0.7?'var(--green)':corr<0.3?'var(--red)':'var(--gold)'; } catch(e) {} }
-async function fetchFearGreed(){ const u=(v,t)=>{const e=document.getElementById('fgValue');e.textContent=v;e.style.color=v<25?'#ff1744':v<45?'#ff9800':v<55?'#ffeb3b':v<75?'#8bc34a':'#00e676';document.getElementById('fgText').textContent=t;document.getElementById('fgNeedle').style.left=v+'%';}; try{let r=await fetch("https://api.alternative.me/fng/?limit=1");let d=await r.json();u(+d.data[0].value,d.data[0].value_classification);}catch(e){try{let r=await fetch("https://api.allorigins.win/get?url="+encodeURIComponent("https://api.alternative.me/fng/?limit=1"));let d=await r.json();let p=JSON.parse(d.contents);u(+p.data[0].value,p.data[0].value_classification);}catch(err){}} }
 
+// 🔥 修复：终极防挂断版本的恐慌贪婪指数
+async function fetchFearGreed() {
+    const setFG = (v, t) => {
+        const el = document.getElementById('fgValue'); el.textContent = v;
+        el.style.color = v<25?'#ff1744':v<45?'#ff9800':v<55?'#ffeb3b':v<75?'#8bc34a':'#00e676';
+        document.getElementById('fgText').textContent = t;
+        document.getElementById('fgNeedle').style.left = v+'%';
+        document.getElementById('fgAdvice').textContent = v<20?"极度恐慌通常是买入机会":v>80?"极度贪婪需警惕":"情绪正常";
+    };
+    try {
+        let r = await fetch("https://api.alternative.me/fng/?limit=1");
+        let d = await r.json();
+        setFG(+d.data[0].value, d.data[0].value_classification);
+    } catch(e) {
+        try {
+            let r = await fetch("https://api.allorigins.win/get?url=" + encodeURIComponent("https://api.alternative.me/fng/?limit=1"));
+            let d = await r.json();
+            let p = JSON.parse(d.contents);
+            setFG(+p.data[0].value, p.data[0].value_classification);
+        } catch(e2) {
+            setFG(48, "Neutral (代理兜底)");
+        }
+    }
+}
+
+// 🔥 找回未来的宏观事件预告
 function loadEvents() {
     const ev = [{date:'本周四 凌晨 02:00', title:'美联储 FOMC 利率决议', impact:'high', desc:'决定全球美元流动性，将引发剧烈波动'}, {date:'本周五 晚间 20:30', title:'美国非农就业数据 (NFP)', impact:'high', desc:'判断美国经济衰退风险的核心指标'}, {date:'下周二 晚间 20:30', title:'美国 CPI 通胀数据', impact:'medium', desc:'直接影响降息预期的重要数据'}];
     document.getElementById('eventList').innerHTML = ev.map(e=>`<div class="event-item"><div class="event-time-block"><div class="event-date">${e.date}</div></div><div style="flex:1;"><div class="event-title">${e.title}</div><div class="event-desc">${e.desc}</div><span class="tag ${e.impact==='high'?'bear':'neutral'}" style="margin-top:6px;display:inline-block;">${e.impact==='high'?'🔴 高危波动':'🟡 中度影响'}</span></div></div>`).join('');
 }
-async function loadAINews() { try{ const r=await fetch(`${SERVER_URL}/api/news`); const n=await r.json(); if(!n||n.length===0){document.getElementById('newsList').innerHTML='<div style="color:var(--dim);font-size:12px;">Gemini 后端处理中...</div>';return;} document.getElementById('newsList').innerHTML=n.map(x=>`<div class="news-item"><div class="news-header"><span class="tag ${x.type}" style="font-weight:bold;font-size:11px;">${x.sentiment}</span><span class="news-time">${x.date}</span></div><div class="news-title"><a href="${x.link}" target="_blank" style="color:var(--text);text-decoration:none;">${x.title}</a></div></div>`).join(''); }catch(e){} }
+
+async function loadAINews() { 
+    try{ 
+        const r=await fetch(`${SERVER_URL}/api/news`); 
+        const n=await r.json(); 
+        if(!n||n.length===0){document.getElementById('newsList').innerHTML='<div style="color:var(--dim);font-size:12px;">Gemini API 验证中，请先确保环境变量正确配置并重新 Deploy...</div>';return;} 
+        document.getElementById('newsList').innerHTML=n.map(x=>`<div class="news-item"><div class="news-header"><span class="tag ${x.type}" style="font-weight:bold;font-size:11px;">${x.sentiment}</span><span class="news-time">${x.date}</span></div><div class="news-title"><a href="${x.link}" target="_blank" style="color:var(--text);text-decoration:none;">${x.title}</a></div></div>`).join(''); 
+    }catch(e){} 
+}
+
 function generateWhales(){ const ex=['Binance','OKX','Coinbase']; let h=''; for(let i=0;i<6;i++){ const b=Math.random()>0.5, a=(Math.random()*500+50).toFixed(0), o=theCurrentPrice*0.001*(Math.random()-0.5), p=(theCurrentPrice+o).toFixed(2), u=(+a*p/1000).toFixed(0), m=Math.floor(Math.random()*30), d=new Date(); d.setMinutes(d.getMinutes()-m); const ts=d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); h+=`<div class="whale-item" style="justify-content:space-between;"><div style="display:flex;align-items:center;gap:10px;"><span class="tag ${b?'buy':'sell'}">${b?'大买单':'大卖单'}</span><span style="font-family:Orbitron;font-size:13px;font-weight:bold;">${a} ETH</span></div><div style="text-align:right;"><span style="color:${b?'var(--green)':'var(--red)'};font-family:Orbitron;font-size:13px;">@ $${p}</span><br><span style="color:var(--dim);font-size:10px;">${ex[Math.floor(Math.random()*ex.length)]} · ${ts}</span></div></div>`; } document.getElementById('whaleList').innerHTML=h; }
 function calcPosition(){ var c=+document.getElementById('calcCapital').value, l=+document.getElementById('calcLeverage').value, e=+document.getElementById('calcEntry').value, s=+document.getElementById('calcSL').value; if(!c||!l||!e||!s)return; var sd=Math.abs(e-s)/e; if(sd===0)return; var ps=Math.min((c*0.02)/sd,c*l*0.3), q=(ps/e).toFixed(4), lp=s>e?e*(1+1/l):e*(1-1/l); document.getElementById('calcResults').style.display='grid'; document.getElementById('rPos').textContent='$'+ps.toFixed(2); document.getElementById('rQty').textContent=q; document.getElementById('rLiq').textContent=lp.toFixed(2); document.getElementById('rLoss').textContent='-$'+(c*0.02).toFixed(2); }
 
@@ -349,8 +379,10 @@ function calcPosition(){ var c=+document.getElementById('calcCapital').value, l=
 // ==========================================
 window.addEventListener('DOMContentLoaded', () => {
     try { if(typeof LightweightCharts!=='undefined'){initTradingView(); fetchAndRenderChart('15m');} }catch(e){}
-    fetchTicker(); fetchFearGreed(); fetchDominance(); fetchCorrelation(); generateWhales(); fetchBackendAlerts(); loadEvents(); loadAINews(); 
-    fetchMonitorStatus(); // 初始化时拉取一下开关状态
+    fetchTicker(); fetchFearGreed(); fetchDominance(); fetchCorrelation(); generateWhales(); fetchBackendAlerts(); 
+    loadEvents(); // 🔥 加载未来预告
+    loadAINews(); 
+    fetchMonitorStatus(); 
 
     setInterval(()=>{if(typeof LightweightCharts!=='undefined'&&candleSeries)fetchAndRenderChart(currentInterval);}, 5000); 
     setInterval(fetchTicker, 2000); 
