@@ -11,7 +11,6 @@ const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
 const TIMEFRAMES = ["5m", "15m", "1h", "4h"]; 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; 
 
-// 🔥 绝对不能在这里写真实的 Key！必须用 process.env
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY; 
 const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY;
 const KV_REST_API_TOKEN = process.env.KV_REST_API_TOKEN;
@@ -23,7 +22,7 @@ let lastPrices = { BTCUSDT: null, ETHUSDT: null, SOLUSDT: null };
 let cachedNews = []; 
 let isMonitoringActive = true; 
 
-console.log("🚀 量化 AI (Gemini 2.0 最新闪电引擎) 已上线...");
+console.log("🚀 量化 AI (Gemini 1.5 稳定闪电引擎) 已上线...");
 
 function postJSON(url, body, extraHeaders) {
   return new Promise((resolve, reject) => {
@@ -31,7 +30,7 @@ function postJSON(url, body, extraHeaders) {
     const urlObj = new URL(url);
     const options = { 
       hostname: urlObj.hostname, 
-      path: urlObj.pathname + urlObj.search, // 完美保留 ?key=... 参数
+      path: urlObj.pathname + urlObj.search, 
       method: 'POST', 
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), ...(extraHeaders||{}) } 
     };
@@ -45,7 +44,7 @@ function postJSON(url, body, extraHeaders) {
 
 function fetchJSON(url, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'Crypto-Monitor/13.5', ...extraHeaders } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': 'Crypto-Monitor/13.6', ...extraHeaders } }, (res) => {
       let data = ''; res.on('data', chunk => data += chunk);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } });
     }).on('error', reject);
@@ -75,8 +74,8 @@ async function fetchAndAnalyzeNews() {
 1. date：转为北京时间(MM-DD HH:mm)。2. type："bull", "bear", "neutral"。
 英文新闻：\n${topNews.map(n => n.pubDate + ' | ' + n.title).join('\n')}`;
 
-        // 🔥 使用最新 2.0 模型
-        const aiRes = await postJSON(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
+        // 🔥 使用最稳健的 1.5-flash 模型
+        const aiRes = await postJSON(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
             contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3 }
         });
         
@@ -95,8 +94,8 @@ async function askAIBatchDecisions(batchData) {
 严格返回 JSON 数组：[{"symbol": "BTCUSDT", "timeframe": "15m", "direction": "WAIT", "style": "STEADY", "win_rate": 0, "sl": 0, "tp1": 0, "tp2": 0, "reason": "理由简述"}]`;
 
   try {
-    // 🔥 使用最新 2.0 模型
-    const res = await postJSON(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
+    // 🔥 使用最稳健的 1.5-flash 模型
+    const res = await postJSON(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
         contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.2 }
     });
     if (!res.candidates) throw new Error(JSON.stringify(res));
@@ -174,18 +173,44 @@ http.createServer(async (req, res) => {
   if (req.url === '/status') { res.writeHead(200); res.end(JSON.stringify({ status: "alive", isMonitoringActive })); return; }
   if (req.url === '/api/toggle-monitor' && req.method === 'POST') { isMonitoringActive = !isMonitoringActive; res.writeHead(200); res.end(JSON.stringify({ success: true, isMonitoringActive })); return; }
   if (req.url === '/api/news' && req.method === 'GET') { res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(cachedNews)); return; }
-  
+
   if (req.url === '/api/test-signal') {
-      sendWeChatPush("【Gemini 测试】", "环境搭建完毕，全部通畅！");
+      sendWeChatPush("【Gemini 测试】", "API 秘钥全新就位！系统全通！");
       res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'}); res.end("<h2 style='color:green;text-align:center'>✅ API Key 验证成功！系统全通！</h2>"); return;
   }
-  // 省略 close, logs, alerts 等接口 (与之前一致，已确认无bug)
+  if (req.url === '/api/close' && req.method === 'POST') {
+      let body = ''; req.on('data', c => body += c.toString());
+      req.on('end', async () => {
+          const { id, exitPrice } = JSON.parse(body); const logs = await loadData('trade_logs'); const trade = logs.find(t => t.id === id);
+          if (trade) {
+              trade.exitPrice = parseFloat(exitPrice); trade.status = 'CLOSED';
+              trade.roi = (trade.action === '做多' ? ((trade.exitPrice - trade.entryPrice) / trade.entryPrice) * 100 : ((trade.entryPrice - trade.exitPrice) / trade.entryPrice) * 100).toFixed(2);
+              await saveData('trade_logs', logs); res.writeHead(200); res.end(JSON.stringify({success: true}));
+          } else { res.writeHead(400); res.end(); }
+      }); return;
+  }
   if (req.url === '/api/logs') { const logs = await loadData('trade_logs'); res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(logs.reverse())); return; }
+  if (req.url === '/api/alerts' && req.method === 'GET') { const alerts = await loadData('price_alerts'); res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(alerts)); return; }
+  if (req.url === '/api/alerts' && req.method === 'POST') {
+      let body = ''; req.on('data', c => body += c.toString());
+      req.on('end', async () => {
+          const newAlert = JSON.parse(body); const alerts = await loadData('price_alerts');
+          alerts.push({ id: Date.now().toString(), symbol: newAlert.symbol || 'ETHUSDT', price: newAlert.price, dir: newAlert.dir });
+          await saveData('price_alerts', alerts); res.writeHead(200); res.end(JSON.stringify({success: true}));
+      }); return;
+  }
+  if (req.url === '/api/alerts' && req.method === 'DELETE') {
+      let body = ''; req.on('data', c => body += c.toString());
+      req.on('end', async () => {
+          const { id } = JSON.parse(body); let alerts = await loadData('price_alerts'); alerts = alerts.filter(a => a.id !== id);
+          await saveData('price_alerts', alerts); res.writeHead(200); res.end(JSON.stringify({success: true}));
+      }); return;
+  }
   res.writeHead(200); res.end("API is running");
 }).listen(process.env.PORT || 3000);
 
 async function startApp() {
-    console.log("🚀 启动！Gemini 2.0 引擎准备就绪！");
+    console.log("🚀 启动！Gemini 1.5 稳定引擎准备就绪！");
     fetchAndAnalyzeNews(); 
     setInterval(fetchAndAnalyzeNews, 30 * 60 * 1000); 
     setInterval(runMonitor, CHECK_INTERVAL_MS); 
