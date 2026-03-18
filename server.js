@@ -5,12 +5,12 @@ const EMAILJS_SERVICE_ID = "service_op2rg49";
 const EMAILJS_TEMPLATE_ID = "template_eftwoy6"; 
 const EMAILJS_PUBLIC_KEY = "tIZB9DwwpEKr3KQpQ"; 
 const NOTIFY_EMAIL = "2183089849@qq.com";
-// 如果没有配置，就不起作用
 const KV_REST_API_URL = "https://exact-sparrow-75815.upstash.io"; 
 
 const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
 const TIMEFRAMES = ["5m", "15m", "1h", "4h"]; 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; 
+const ALERT_CHECK_INTERVAL = 10 * 1000; // 🔥 报警巡逻间隔：10秒
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY; 
 const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY;
@@ -23,10 +23,10 @@ let lastPrices = { BTCUSDT: null, ETHUSDT: null, SOLUSDT: null };
 let cachedNews = []; 
 let isMonitoringActive = true; 
 
-// 🔥 核心修复：真正的单机内存模式，解决报警存不上的问题！
+// 🔥 纯单机内存模式
 let inMemoryDB = { trade_logs: [], price_alerts: [] };
 
-console.log("🚀 量化 AI (DeepSeek 纯血融合版) 已上线...");
+console.log("🚀 量化 AI (DeepSeek 完整报警版) 已上线...");
 
 function postJSON(url, body, extraHeaders) {
   return new Promise((resolve, reject) => {
@@ -43,7 +43,7 @@ function postJSON(url, body, extraHeaders) {
 
 function fetchJSON(url, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'Crypto-Monitor/14.1', ...extraHeaders } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': 'Crypto-Monitor/14.2', ...extraHeaders } }, (res) => {
       let data = ''; res.on('data', chunk => data += chunk);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } });
     }).on('error', reject);
@@ -56,7 +56,6 @@ async function sendSignalEmail(action, messageHtml, price, titleStr, symbol) {
   try { await postJSON("https://api.emailjs.com/api/v1.0/email/send", { service_id: EMAILJS_SERVICE_ID, template_id: EMAILJS_TEMPLATE_ID, user_id: EMAILJS_PUBLIC_KEY, accessToken: EMAILJS_PRIVATE_KEY, template_params: { to_email: NOTIFY_EMAIL, symbol: symbol, interval: titleStr, signal: action, price: price.toString(), message: messageHtml, time: time }}); } catch (e) {}
 }
 
-// 🔥 修复：如果没有配置数据库秘钥，自动使用内存存取
 async function loadData(key) { 
     if (!KV_REST_API_URL || !KV_REST_API_TOKEN) return inMemoryDB[key] || []; 
     try { const res = await fetchJSON(`${KV_REST_API_URL}/get/${key}`, { Authorization: `Bearer ${KV_REST_API_TOKEN}` }); if (res.result) return typeof res.result === 'string' ? JSON.parse(res.result) : res.result; } catch(e) {} 
@@ -89,7 +88,6 @@ async function fetchAndAnalyzeNews() {
         
         let jsonStr = aiRes.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```json/gi, '').replace(/```/g, '').trim();
         cachedNews = JSON.parse(jsonStr).map((item, i) => ({ ...item, link: topNews[i].link }));
-        console.log("📰 DeepSeek 新闻翻译完成！");
     } catch(e) {}
 }
 
@@ -104,10 +102,42 @@ async function askAIBatchDecisions(batchData) {
     const res = await postJSON("https://api.deepseek.com/chat/completions", {
         model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.2 
     }, { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` });
-    
     let jsonStr = res.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```json/gi, '').replace(/```/g, '').trim();
     return JSON.parse(jsonStr);
   } catch (e) { return []; }
+}
+
+// 🔥 核心修复：加回每 10 秒巡逻一次的报警引擎！
+async function runAlertEngine() {
+    try {
+        const alerts = await loadData('price_alerts'); 
+        if (!alerts || alerts.length === 0) return;
+        
+        const res = await fetchJSON('https://api.binance.us/api/v3/ticker/price'); 
+        if (!Array.isArray(res)) return;
+        const priceMap = {}; res.forEach(item => priceMap[item.symbol] = parseFloat(item.price));
+        
+        let triggered = false; 
+        const remainingAlerts = [];
+        
+        for (const alert of alerts) {
+            const currentPrice = priceMap[alert.symbol] || priceMap["ETHUSDT"];
+            if (!currentPrice) { remainingAlerts.push(alert); continue; }
+            
+            if ((alert.dir === 'above' && currentPrice >= alert.price) || (alert.dir === 'below' && currentPrice <= alert.price)) {
+                const title = `🚨 【价格提醒】触发！`; 
+                const desp = `**币种**: ${alert.symbol || 'ETHUSDT'}\n**当前价格**: ${currentPrice}\n**您的预设**: 价格已${alert.dir === 'above' ? '涨破' : '跌破'} ${alert.price}`;
+                
+                console.log(`🚨 报警已触发: ${alert.symbol} 到达 ${currentPrice}`);
+                await sendWeChatPush(title, desp); 
+                await sendSignalEmail("🚨 价格报警", desp.replace(/\n/g, '<br>'), currentPrice, "实时报警", alert.symbol || 'ETHUSDT');
+                triggered = true;
+            } else {
+                remainingAlerts.push(alert);
+            }
+        }
+        if (triggered) await saveData('price_alerts', remainingAlerts);
+    } catch(e) {}
 }
 
 async function runMonitor() {
@@ -180,6 +210,12 @@ http.createServer(async (req, res) => {
   if (req.url === '/api/toggle-monitor' && req.method === 'POST') { isMonitoringActive = !isMonitoringActive; res.writeHead(200); res.end(JSON.stringify({ success: true, isMonitoringActive })); return; }
   if (req.url === '/api/news' && req.method === 'GET') { res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(cachedNews)); return; }
 
+  // 🧪 测试大喇叭是否畅通的专用接口
+  if (req.url === '/api/test-signal') {
+      sendWeChatPush("【测试通知】", "微信推送功能正常！");
+      sendSignalEmail("🔔 邮件测试", "恭喜你，邮件推送功能配置正确，通信顺畅！", 0, "测试", "系统");
+      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'}); res.end("<h2 style='color:green;text-align:center'>✅ 信号已发送！请检查微信和邮箱！</h2>"); return;
+  }
   if (req.url === '/api/close' && req.method === 'POST') {
       let body = ''; req.on('data', c => body += c.toString());
       req.on('end', async () => {
@@ -216,6 +252,7 @@ async function startApp() {
     fetchAndAnalyzeNews(); 
     setInterval(fetchAndAnalyzeNews, 30 * 60 * 1000); 
     setInterval(runMonitor, CHECK_INTERVAL_MS); 
+    setInterval(runAlertEngine, ALERT_CHECK_INTERVAL); // 🔥 启动报警巡逻！
     runMonitor();
 }
 startApp();
