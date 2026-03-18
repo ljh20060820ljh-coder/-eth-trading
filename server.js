@@ -2,7 +2,7 @@ const https = require('https');
 const http = require('http');
 
 // ==========================================
-// 🔐 终极配置 (多币种 + 波动率突破特种兵 + 测试后门)
+// 🔐 终极配置 (多币种 + 特种兵 + AI 新闻主编)
 // ==========================================
 const EMAILJS_SERVICE_ID = "service_op2rg49"; 
 const EMAILJS_TEMPLATE_ID = "template_eftwoy6"; 
@@ -11,7 +11,6 @@ const NOTIFY_EMAIL = "2183089849@qq.com";
 const KV_REST_API_URL = "https://exact-sparrow-75815.upstash.io"; 
 
 const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
-// 🔥 加入 5m 级别高频照妖镜
 const TIMEFRAMES = ["5m", "15m", "1h", "4h"]; 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; 
 const ALERT_CHECK_INTERVAL = 10 * 1000;  
@@ -26,8 +25,9 @@ SYMBOLS.forEach(sym => TIMEFRAMES.forEach(tf => positions[`${sym}_${tf}`] = null
 
 let lastPrices = { BTCUSDT: null, ETHUSDT: null, SOLUSDT: null };
 let reflectedToday = false; 
+let cachedNews = []; // 🔥 存放 AI 翻译后的新闻
 
-console.log("🚀 量化 AI (特种兵突破矩阵 + 全天候警报 + 测试通道) 已上线...");
+console.log("🚀 量化 AI (特种兵矩阵 + AI 资讯主编) 已上线...");
 
 // --- 网络请求核心 ---
 function postJSON(url, body, extraHeaders) {
@@ -45,14 +45,14 @@ function postJSON(url, body, extraHeaders) {
 
 function fetchJSON(url, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'Crypto-Monitor/11.0', ...extraHeaders } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': 'Crypto-Monitor/12.0', ...extraHeaders } }, (res) => {
       let data = ''; res.on('data', chunk => data += chunk);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } });
     }).on('error', reject);
   });
 }
 
-// --- 推送与数据存取 (简写版) ---
+// --- 推送与存取 ---
 async function sendWeChatPush(title, desp) { if(SERVERCHAN_SENDKEY) try { await postJSON(`https://sctapi.ftqq.com/${SERVERCHAN_SENDKEY}.send`, { title, desp }); }catch(e){} }
 async function sendSignalEmail(action, messageHtml, price, titleStr, symbol) {
   const time = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
@@ -67,7 +67,36 @@ function calcMA(data, period) { if (data.length < period) return 0; return data.
 function calcRSI(data, period = 14) { if (data.length < period + 1) return 50; let gains = 0, losses = 0; for (let i = data.length - period; i < data.length; i++) { const diff = data[i].close - data[i-1].close; if (diff > 0) gains += diff; else losses -= diff; } const avgLoss = losses / period; if (avgLoss === 0) return 100; return 100 - (100 / (1 + (gains / period) / avgLoss)); }
 function calcATR(data, period = 14) { if (data.length < period + 1) return 0; let sumTR = 0; for (let i = data.length - period; i < data.length; i++) { const high = data[i].high, low = data[i].low, prevClose = data[i-1].close; sumTR += Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)); } return sumTR / period; }
 
-// --- 🧠 核心重构：AI 大脑 (植入特种突破协议) ---
+// --- 🌍 新增：AI 全球资讯翻译与情绪引擎 ---
+async function fetchAndAnalyzeNews() {
+    if (!DEEPSEEK_API_KEY) return;
+    try {
+        const res = await fetchJSON('https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Fcointelegraph.com%2Frss');
+        if (!res || !res.items) return;
+        const topNews = res.items.slice(0, 6);
+        
+        const prompt = `你是一名加密货币华尔街分析师。以下是 6 条刚发布的英文原版头条，请将它们翻译成中文，并分析是对大盘【利好】还是【利空】，并附带概率。
+要求严格返回 JSON 数组格式，不要输出其他废话：
+[{"date":"03-18 15:30", "title":"中文标题", "sentiment":"利好 80%", "type":"bull"}, ...]
+
+说明：
+1. date：提取发布时间，转换为北京时间，必须精确到某月某日和时分(MM-DD HH:mm)。
+2. sentiment：根据你的判断，写如"利好 75%", "利空 60%"，如果不确定就写"中性"。
+3. type：只能是 "bull"(绿字利好), "bear"(红字利空), "neutral"(灰字中性)。
+英文新闻：\n${topNews.map(n => n.pubDate + ' | ' + n.title).join('\n')}`;
+
+        const aiRes = await postJSON("https://api.deepseek.com/chat/completions", {
+            model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.3 
+        }, { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` });
+        
+        let jsonStr = aiRes.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```json/g, '').replace(/```/g, '').trim();
+        let parsed = JSON.parse(jsonStr);
+        cachedNews = parsed.map((item, i) => ({ ...item, link: topNews[i].link }));
+        console.log("📰 AI 资讯情绪分析已更新");
+    } catch(e) { console.error("资讯 AI 分析失败:", e.message); }
+}
+
+// --- 🧠 AI 交易大脑 ---
 async function askAIForDecision(symbol, timeframe, confirmedCandles, livePrice, currentPos) {
   if (!DEEPSEEK_API_KEY) return null;
   const lastClosed = confirmedCandles[confirmedCandles.length - 1];
@@ -75,31 +104,24 @@ async function askAIForDecision(symbol, timeframe, confirmedCandles, livePrice, 
   const rsi = calcRSI(confirmedCandles, 14), atr = calcATR(confirmedCandles, 14); 
   const posText = currentPos === 'LONG' ? '多单' : currentPos === 'SHORT' ? '空单' : '空仓';
 
-  // 🔥 特种雷达逻辑：计算实时偏离度
   const priceDev = livePrice - lastClosed.close;
   const atrThreshold = atr * 1.5;
   const isBreakout = Math.abs(priceDev) > atrThreshold;
-  const surgeAlert = isBreakout ? 
-      `🚨【极速突破警告】当前现价偏离上一根收盘价 ${priceDev.toFixed(2)}，已超过 1.5 倍 ATR波动率 (${atrThreshold.toFixed(2)})！属于剧烈单边行情！` : 
-      `盘口波动正常，未超过 1.5 倍 ATR。`;
+  const surgeAlert = isBreakout ? `🚨【极速突破警告】现价偏离超 1.5倍 ATR (${atrThreshold.toFixed(2)})！` : `正常波动`;
 
-  const prompt = `你是顶级量化模型。正在分析: ${symbol} 的 ${timeframe} 级别 K线。
-【上一个完整${timeframe}收盘定型】: 收盘价=${lastClosed.close}, MA5=${ma5.toFixed(2)}, RSI=${rsi.toFixed(1)}, ATR=${atr.toFixed(2)}。
-【当前秒级跳动价格】: ${livePrice}。当前此周期持仓: ${posText}。
-【实时异动雷达】: ${surgeAlert}
-【特种作战指令】: 你是一个“稳健的激进进攻手”。如果雷达触发【极速突破警告】，这大概率是瀑布砸盘或暴涨爆拉的开端，你不必死板地等待均线死叉/金叉，可直接给出风格为 "AGGRESSIVE" (激进) 的顺势做多或做空指令，并务必设定严格止损！如果盘口波动正常，请按传统均线+RSI逻辑判断，给出 "STEADY" (稳健) 或 "WAIT" (观望)。
-【要求】: 必须且只能回复 JSON。
-{"direction": "WAIT", "style": "STEADY", "win_rate": 0, "sl": 0, "tp1": 0, "tp2": 0, "reason": "分析逻辑"}`;
+  const prompt = `顶级量化模型。分析: ${symbol} ${timeframe}K线。
+【上根收盘】: MA5=${ma5.toFixed(2)}, RSI=${rsi.toFixed(1)}, ATR=${atr.toFixed(2)}。
+【当前现价】: ${livePrice}。当前持仓: ${posText}。雷达: ${surgeAlert}
+如果是极速突破可给 "AGGRESSIVE"，否则按正常均线给 "STEADY" 或 "WAIT"。
+严格回复 JSON: {"direction": "WAIT", "style": "STEADY", "win_rate": 0, "sl": 0, "tp1": 0, "tp2": 0, "reason": "分析逻辑"}`;
 
   try {
-    const res = await postJSON("https://api.deepseek.com/chat/completions", {
-      model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.2 
-    }, { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` });
+    const res = await postJSON("https://api.deepseek.com/chat/completions", { model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.2 }, { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` });
     return res.choices[0].message.content;
   } catch (e) { return null; }
 }
 
-// --- 独立线程：网页价格提醒 ---
+// --- 报警监控 ---
 async function runAlertEngine() {
     try {
         const alerts = await loadData('price_alerts'); if (!alerts || alerts.length === 0) return;
@@ -135,44 +157,36 @@ async function runMonitor() {
             if (!aiResponse) continue;
             
             let aiObj;
-            try { aiObj = JSON.parse(aiResponse.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```json/g, '').replace(/```/g, '').trim()); } 
-            catch(e) { continue; }
+            try { aiObj = JSON.parse(aiResponse.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```json/g, '').replace(/```/g, '').trim()); } catch(e) { continue; }
 
             const targetDir = aiObj.direction ? aiObj.direction.toUpperCase() : 'WAIT';
             const isAggressive = aiObj.style ? aiObj.style.toUpperCase() === 'AGGRESSIVE' : false;
             const winRate = parseInt(aiObj.win_rate) || 0;
 
             if (targetDir === positions[posKey]) continue; 
-
-            let signalTitle = null;
-            let actionStr = targetDir === 'LONG' ? "做多" : "做空";
-            let styleStr = isAggressive ? "激进" : "稳健";
+            let signalTitle = null; let actionStr = targetDir === 'LONG' ? "做多" : "做空"; let styleStr = isAggressive ? "激进" : "稳健";
 
             if (targetDir === 'WAIT') {
                 if (positions[posKey] !== null) { signalTitle = `【平仓警报】`; positions[posKey] = null; } else continue;
             } else {
                 if (isAggressive && winRate < 70) continue;
-                if (positions[posKey] === null) signalTitle = `【建仓指令】${styleStr}${actionStr}`;
-                else signalTitle = `【紧急反手】${styleStr}${actionStr}`;
+                if (positions[posKey] === null) signalTitle = `【建仓指令】${styleStr}${actionStr}`; else signalTitle = `【紧急反手】${styleStr}${actionStr}`;
                 positions[posKey] = targetDir; 
                 await addTradeLog(symbol, timeframe, actionStr, styleStr, lastPrices[symbol]); 
             }
 
             let emailBody = `<b>【操作逻辑】(${timeframe}级别)</b><br>${aiObj.reason}<br><br>`;
             let wechatText = `分析周期: ${timeframe}\n币种: ${symbol}\n价格: ${lastPrices[symbol]}\n逻辑: ${aiObj.reason}\n`;
-
             if (targetDir !== 'WAIT') {
                 emailBody += `<b>【风控点位】</b><br>🛑 止损: ${aiObj.sl}<br>🎯 TP1: ${aiObj.tp1}<br>🎯 TP2: ${aiObj.tp2}<br>📊 胜率: ${winRate}%`;
                 wechatText += `\n🛑 止损: ${aiObj.sl}\n🎯 止盈: ${aiObj.tp1} / ${aiObj.tp2}\n📊 预计胜率: ${winRate}%`;
             }
-
             if (signalTitle) {
-                console.log(`[发出信号] ${symbol} ${timeframe} ${signalTitle}`);
                 await sendSignalEmail(`${signalTitle} [${timeframe}]`, emailBody, lastPrices[symbol], `${timeframe} K线`, symbol);
                 await sendWeChatPush(`${signalTitle} ${symbol}(${timeframe})`, wechatText);
             }
           } catch (e) { }
-          await new Promise(resolve => setTimeout(resolve, 1500)); // 降速防止封IP
+          await new Promise(resolve => setTimeout(resolve, 1500)); 
       }
   }
 }
@@ -181,23 +195,17 @@ async function runMonitor() {
 http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, DELETE'); res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
-  
   if (req.url === '/status') { res.writeHead(200); res.end(JSON.stringify({ status: "alive" })); return; }
+  
+  // 📰 提供 AI 新闻接口给前端
+  if (req.url === '/api/news' && req.method === 'GET') { res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(cachedNews)); return; }
 
-  // 🟢 隐藏后门：专门用于测试 AI 交易信号推送
   if (req.url === '/api/test-signal') {
-      const testHtml = `<b>【操作逻辑】(测试级别)</b><br>收到主人的最高指令，正在进行系统全链路通信测试。特种兵雷达运转正常！<br><br><b>【风控点位】</b><br>🛑 止损: 2000<br>🎯 TP1: 3000<br>🎯 TP2: 3500<br>📊 胜率: 99%`;
-      const testWechat = `分析周期: 5m\n币种: ETHUSDT\n价格: 2500.00\n逻辑: 收到主人的最高指令，正在进行系统全链路通信测试。特种兵雷达运转正常！\n\n🛑 止损: 2000\n🎯 止盈: 3000 / 3500\n📊 预计胜率: 99%`;
-      
-      // 触发发信
-      sendSignalEmail("【建仓指令】★ 激进做多 [5m]", testHtml, 2500, "5m K线", "ETHUSDT");
-      sendWeChatPush("【建仓指令】★ 激进做多 ETH(5m)", testWechat);
-      
-      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
-      res.end("<h2 style='color:green; text-align:center; margin-top:50px;'>✅ 发射成功！<br>系统已模拟 AI 交易信号，请立刻检查您的微信和邮箱！</h2>");
-      return;
+      const testHtml = `<b>【操作逻辑】(测试级别)</b><br>收到最高指令，全链路通信正常！<br><br><b>【风控点位】</b><br>🛑 止损: 2000<br>🎯 止盈: 3000<br>📊 胜率: 99%`;
+      const testWechat = `测试正常\n币种: ETHUSDT\n逻辑: 通信测试，请忽略。\n\n🛑 止损: 2000\n🎯 止盈: 3000\n📊 预计胜率: 99%`;
+      sendSignalEmail("【建仓指令】★ 激进做多 [5m]", testHtml, 2500, "5m K线", "ETHUSDT"); sendWeChatPush("【建仓指令】测试", testWechat);
+      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'}); res.end("<h2 style='color:green;text-align:center'>✅ 发射成功！</h2>"); return;
   }
-
   if (req.url === '/api/close' && req.method === 'POST') {
       let body = ''; req.on('data', c => body += c.toString());
       req.on('end', async () => {
@@ -230,7 +238,9 @@ http.createServer(async (req, res) => {
 }).listen(process.env.PORT || 3000);
 
 async function startApp() {
-    console.log("🚀 启动！特种突破矩阵 + 报警引擎挂载完毕！");
+    console.log("🚀 启动！AI 主编已挂载！");
+    fetchAndAnalyzeNews(); // 启动时抓一次新闻
+    setInterval(fetchAndAnalyzeNews, 30 * 60 * 1000); // 每半小时翻译分析一次新闻！
     setInterval(runMonitor, CHECK_INTERVAL_MS); 
     setInterval(runAlertEngine, ALERT_CHECK_INTERVAL); 
     runMonitor();
