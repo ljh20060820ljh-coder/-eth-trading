@@ -6,7 +6,7 @@
 <title>多币种 AI 看盘工具 (TV旗舰版)</title>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 <link rel="manifest" href="/manifest.json">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -236,7 +236,6 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 // ==========================================
 const SERVER_URL = 'https://eth-trading-1.onrender.com';
 
-// --- 页面导航 ---
 function showPage(name, btn) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -246,7 +245,7 @@ function showPage(name, btn) {
 }
 
 // ==========================================
-// ☁️ 云端价格提醒逻辑 (这部分不报错才能跑完全局！)
+// ☁️ 云端报警、AI日志等功能 (独立运行区)
 // ==========================================
 async function fetchBackendAlerts() {
     try {
@@ -254,7 +253,6 @@ async function fetchBackendAlerts() {
         const alerts = await res.json();
         const el = document.getElementById('alertList');
         if(!alerts || alerts.length === 0) { el.innerHTML = '<div style="color:var(--dim);font-size:11px;">暂无云端提醒任务</div>'; return; }
-        
         el.innerHTML = alerts.map(a => `
             <div class="alert-item">
                 <span style="color:#00cfff; font-weight:bold;">${a.symbol.replace('USDT','')}</span>
@@ -280,15 +278,9 @@ async function addBackendAlert() {
 }
 
 async function removeBackendAlert(id) { 
-    try { 
-        await fetch(`${SERVER_URL}/api/alerts`, { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id}) }); 
-        fetchBackendAlerts(); 
-    } catch(e) {} 
+    try { await fetch(`${SERVER_URL}/api/alerts`, { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id}) }); fetchBackendAlerts(); } catch(e) {} 
 }
 
-// ==========================================
-// 🤖 AI 日志与资金曲线
-// ==========================================
 let roiChartInstance = null;
 function renderROIChart(logs) {
     const ctx = document.getElementById('roiChart').getContext('2d');
@@ -336,7 +328,7 @@ async function submitCloseTrade(id) {
 }
 
 // ==========================================
-// 📈 TradingView 旗舰图表引擎
+// 📈 TradingView 防弹版图表引擎
 // ==========================================
 let tvChart = null;
 let candleSeries = null;
@@ -383,7 +375,8 @@ async function fetchAndRenderChart(interval) {
     try { 
         const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=${interval}&limit=200`); 
         const rawData = await res.json();
-        const tvData = rawData.map(d => ({ time: d[0] / 1000, open: parseFloat(d[1]), high: parseFloat(d[2]), low: parseFloat(d[3]), close: parseFloat(d[4]) }));
+        // 修复：强制向下取整时间戳，避免精度错误导致报错
+        const tvData = rawData.map(d => ({ time: Math.floor(d[0] / 1000), open: parseFloat(d[1]), high: parseFloat(d[2]), low: parseFloat(d[3]), close: parseFloat(d[4]) }));
         
         candleSeries.setData(tvData);
         ma5Series.setData(calculateSMA(tvData, 5));
@@ -396,20 +389,19 @@ async function fetchAndRenderChart(interval) {
         const currentRsi = calcRSI(tvData, 14);
         document.getElementById('rsiVal').textContent = currentRsi.toFixed(1);
         document.getElementById('rsiVal').style.color = currentRsi>70 ? '#ff1744' : currentRsi<30 ? '#00e676' : '#c8d8e8';
-    } catch(e) { console.error("图表加载失败", e); } 
+    } catch(e) { console.error("图表加载或渲染失败:", e); } 
 }
 
-// 切换时间周期
 document.getElementById('tabs').addEventListener('click', e => {
   var btn = e.target.closest('.tab'); if(!btn) return;
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   btn.classList.add('active'); 
   currentInterval = btn.dataset.iv; 
-  fetchAndRenderChart(currentInterval);
+  if (typeof LightweightCharts !== 'undefined') { fetchAndRenderChart(currentInterval); }
 });
 
 // ==========================================
-// 🌍 市场与工具逻辑
+// 🌍 市场与工具逻辑 (独立运行区)
 // ==========================================
 async function fetchTicker() { 
     try { 
@@ -437,22 +429,39 @@ function generateWhales() { var exchanges=['Binance','OKX','Coinbase']; var html
 function calcPosition() { var capital=+document.getElementById('calcCapital').value, leverage=+document.getElementById('calcLeverage').value, entry=+document.getElementById('calcEntry').value, sl=+document.getElementById('calcSL').value; if(!capital||!leverage||!entry||!sl){alert('请填写所有字段');return;} var slDist=Math.abs(entry-sl)/entry; if(slDist===0)return; var posSize=Math.min((capital*0.02)/slDist,capital*leverage*0.3); var qty=(posSize/entry).toFixed(4), liqPrice=sl>entry?entry*(1+1/leverage):entry*(1-1/leverage); document.getElementById('calcResults').style.display='grid'; document.getElementById('rPos').textContent='$'+posSize.toFixed(2); document.getElementById('rQty').textContent=qty; document.getElementById('rLiq').textContent=liqPrice.toFixed(2); document.getElementById('rLoss').textContent='-$'+(capital*0.02).toFixed(2); }
 
 // ==========================================
-// 🚀 系统点火 (所有的执行都放在这里！)
+// 🚀 系统点火 (防弹级启动逻辑)
 // ==========================================
-initTradingView();
-fetchAndRenderChart('15m');
-fetchTicker(); 
-fetchFearGreed(); 
-fetchDominance(); 
-loadNews(); 
-generateWhales(); 
-fetchBackendAlerts();
+window.addEventListener('DOMContentLoaded', () => {
+    // 1. 尝试初始化图表，如果被墙则优雅降级，只抛出红字，不卡死系统
+    try {
+        if (typeof LightweightCharts !== 'undefined') {
+            initTradingView();
+            fetchAndRenderChart('15m');
+        } else {
+            console.error("TV 图表库被网络拦截或加载失败");
+            document.getElementById('tvchart').innerHTML = "<div style='color:#ff1744; text-align:center; padding-top:150px; font-family:Orbitron;'>图表引擎加载失败<br><span style='font-size:12px; color:#8a919e;'>请检查网络节点或关闭广告拦截插件</span></div>";
+        }
+    } catch(e) { console.error("图表初始化错误:", e); }
 
-// 设定自动刷新任务
-setInterval(() => { fetchAndRenderChart(currentInterval); }, 5000); // 5秒刷新 K线
-setInterval(fetchTicker, 2000); // 2秒刷新大字价格
-setInterval(fetchBackendAlerts, 10000); // 10秒刷新云端报警列表
-setInterval(generateWhales, 15000); // 大单随机刷新
+    // 2. 独立启动其他所有监控组件，确保它们不受图表死活的影响
+    fetchTicker(); 
+    fetchFearGreed(); 
+    fetchDominance(); 
+    loadNews(); 
+    generateWhales(); 
+    fetchBackendAlerts();
+
+    // 3. 设定各路异步刷新任务
+    setInterval(() => { 
+        if (typeof LightweightCharts !== 'undefined' && candleSeries) {
+            fetchAndRenderChart(currentInterval); 
+        }
+    }, 5000); 
+    
+    setInterval(fetchTicker, 2000); 
+    setInterval(fetchBackendAlerts, 10000); 
+    setInterval(generateWhales, 15000); 
+});
 </script>
 </body>
 </html>
