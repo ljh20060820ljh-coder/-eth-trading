@@ -343,7 +343,8 @@ function initTradingView() {
         grid: { vertLines: { color: 'rgba(255, 255, 255, 0.05)' }, horzLines: { color: 'rgba(255, 255, 255, 0.05)' } },
         crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
         rightPriceScale: { borderColor: 'rgba(255, 255, 255, 0.1)' },
-        timeScale: { borderColor: 'rgba(255, 255, 255, 0.1)', timeVisible: true, secondsVisible: false }
+        timeScale: { borderColor: 'rgba(255, 255, 255, 0.1)', timeVisible: true, secondsVisible: false },
+        localization: { locale: 'zh-CN' } // 🔥 新增：强制坐标轴使用中文日期格式
     });
     candleSeries = tvChart.addCandlestickSeries({ upColor: '#00e676', downColor: '#ff1744', borderUpColor: '#00e676', borderDownColor: '#ff1744', wickUpColor: '#00e676', wickDownColor: '#ff1744' });
     ma5Series = tvChart.addLineSeries({ color: '#f0b429', lineWidth: 2, crosshairMarkerVisible: false, priceLineVisible: false });
@@ -375,8 +376,15 @@ async function fetchAndRenderChart(interval) {
     try { 
         const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=${interval}&limit=200`); 
         const rawData = await res.json();
-        // 修复：强制向下取整时间戳，避免精度错误导致报错
-        const tvData = rawData.map(d => ({ time: Math.floor(d[0] / 1000), open: parseFloat(d[1]), high: parseFloat(d[2]), low: parseFloat(d[3]), close: parseFloat(d[4]) }));
+        
+        // 🔥 核心修复：给时间戳硬加 28800 秒 (8小时)，强制校准为北京时间 (UTC+8)
+        const tvData = rawData.map(d => ({ 
+            time: Math.floor(d[0] / 1000) + 28800, 
+            open: parseFloat(d[1]), 
+            high: parseFloat(d[2]), 
+            low: parseFloat(d[3]), 
+            close: parseFloat(d[4]) 
+        }));
         
         candleSeries.setData(tvData);
         ma5Series.setData(calculateSMA(tvData, 5));
