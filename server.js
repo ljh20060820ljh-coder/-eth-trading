@@ -12,8 +12,7 @@ const TIMEFRAMES = ["5m", "15m", "1h", "4h"];
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; 
 const ALERT_CHECK_INTERVAL = 10 * 1000;  
 
-// 注意要保留双引号！
-const GEMINI_API_KEY = "AIzaSyCQ2ZQ9ODtmbJ5G5mzUB_Lm1uFhSMuIK5M";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY; 
 const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY;
 const KV_REST_API_TOKEN = process.env.KV_REST_API_TOKEN;
 const SERVERCHAN_SENDKEY = process.env.SERVERCHAN_SENDKEY; 
@@ -27,11 +26,17 @@ let isMonitoringActive = true;
 
 console.log("🚀 量化 AI (Gemini 1.5 稳定引擎) 已上线...");
 
+// 🔥 核心修复：把剪掉的门票 (?key=...) 拼回去！
 function postJSON(url, body, extraHeaders) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);
     const urlObj = new URL(url);
-    const options = { hostname: urlObj.hostname, path: urlObj.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), ...(extraHeaders||{}) } };
+    const options = { 
+      hostname: urlObj.hostname, 
+      path: urlObj.pathname + urlObj.search, // 🐞 就是这里！补上了 urlObj.search
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), ...(extraHeaders||{}) } 
+    };
     const req = https.request(options, (res) => {
       let d = ''; res.on('data', c => d += c);
       res.on('end', () => { if (res.statusCode !== 200) reject(new Error(`HTTP ${res.statusCode}: ${d}`)); else { try { resolve(JSON.parse(d)); } catch(e) { resolve(d); } } });
@@ -42,7 +47,7 @@ function postJSON(url, body, extraHeaders) {
 
 function fetchJSON(url, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'Crypto-Monitor/13.0', ...extraHeaders } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': 'Crypto-Monitor/13.1', ...extraHeaders } }, (res) => {
       let data = ''; res.on('data', chunk => data += chunk);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } });
     }).on('error', reject);
@@ -74,7 +79,6 @@ async function fetchAndAnalyzeNews() {
 1. date：提取发布时间转为北京时间(MM-DD HH:mm)。2. sentiment：如"利好 75%"，不确定写"中性"。3. type："bull", "bear", "neutral"。
 英文新闻：\n${topNews.map(n => n.pubDate + ' | ' + n.title).join('\n')}`;
 
-        // 🔥 修正为最稳定的 gemini-1.5-flash 模型
         const aiRes = await postJSON(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
             contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3 }
         });
@@ -103,7 +107,6 @@ ${JSON.stringify(batchData)}
 ]`;
 
   try {
-    // 🔥 修正为最稳定的 gemini-1.5-flash 模型
     const res = await postJSON(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
         contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.2 }
     });
@@ -186,7 +189,7 @@ http.createServer(async (req, res) => {
   if (req.url === '/api/news' && req.method === 'GET') { res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(cachedNews)); return; }
 
   if (req.url === '/api/test-signal') {
-      sendWeChatPush("【Gemini 测试】", "API 秘钥生效！通信正常！");
+      sendWeChatPush("【Gemini 测试】", "API 秘钥生效！网络底层已修复，通信正常！");
       res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'}); res.end("<h2 style='color:green;text-align:center'>✅ API Key 验证成功！</h2>"); return;
   }
   if (req.url === '/api/close' && req.method === 'POST') {
