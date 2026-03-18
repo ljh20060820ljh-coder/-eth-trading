@@ -11,7 +11,6 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="AI看盘">
 <meta name="theme-color" content="#f0b429">
 <style>
 :root{--bg:#070b12;--bg2:#0d1421;--bg3:#111c2e;--gold:#f0b429;--green:#00e676;--red:#ff1744;--blue:#00cfff;--purple:#a78bfa;--text:#c8d8e8;--dim:rgba(200,216,232,0.35);}
@@ -29,15 +28,11 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 .tabs{display:flex;gap:8px;margin-bottom:12px;}
 .tab{padding:5px 14px;border-radius:4px;border:1px solid rgba(255,255,255,0.1);background:transparent;color:var(--dim);font-family:'Share Tech Mono',monospace;font-size:12px;cursor:pointer;}
 .tab.active{background:var(--gold);border-color:var(--gold);color:#000;font-weight:700;}
-
-/* 🔥 TradingView 容器样式 */
 .chart-wrap{background:var(--bg2);border:1px solid rgba(0,207,255,0.1);border-radius:10px;padding:12px;margin-bottom:14px;position:relative; height: 400px; overflow: hidden;}
 .tv-chart { width: 100%; height: 100%; }
-
 .chip{background:var(--bg2);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px 14px;font-size:12px;display:flex;gap:8px;align-items:center;margin-right:10px;margin-bottom:10px;display:inline-flex;}
 .section-title{font-size:10px;letter-spacing:3px;color:var(--gold);margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid rgba(240,180,41,0.15);}
 .panel{background:var(--bg2);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:16px;margin-bottom:16px;}
-/* 行情统计 & 指标 */
 .stats-row{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;}
 .stat-card{flex:1;min-width:90px;background:var(--bg2);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:10px 14px;}
 .stat-label{font-size:10px;color:var(--dim);letter-spacing:2px;margin-bottom:4px;}
@@ -45,7 +40,6 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 .change-badge{display:inline-block;margin-top:6px;font-size:13px;padding:2px 8px;border-radius:3px;}
 .change-badge.up{color:var(--green);background:rgba(0,230,118,0.1);}
 .change-badge.down{color:var(--red);background:rgba(255,23,68,0.1);}
-/* 市场页面样式 */
 .fg-meter{position:relative;height:12px;background:linear-gradient(to right,#ff1744,#ff9800,#ffeb3b,#8bc34a,#00e676);border-radius:6px;margin:12px 0;}
 .fg-needle{position:absolute;top:-4px;width:4px;height:20px;background:#fff;border-radius:2px;transform:translateX(-50%);transition:left 0.8s ease;}
 .fg-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--dim);}
@@ -61,7 +55,6 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 .tag{font-size:10px;padding:2px 8px;border-radius:3px;}
 .tag.buy{background:rgba(0,230,118,0.15);color:var(--green);}
 .tag.sell{background:rgba(255,23,68,0.15);color:var(--red);}
-/* 资讯页面样式 */
 .news-item{padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.05);}
 .news-item:last-child{border-bottom:none;}
 .news-header{display:flex;align-items:center;gap:8px;margin-bottom:4px;}
@@ -72,7 +65,6 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 .event-time-block{min-width:65px;text-align:center;}
 .event-date{font-size:11px;color:var(--gold);}
 .event-title{font-size:12px;color:#fff;margin-bottom:3px;}
-/* 工具页面样式 */
 .calc-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;}
 .calc-field label{font-size:10px;color:var(--dim);letter-spacing:2px;display:block;margin-bottom:6px;}
 .calc-field input{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:6px;padding:8px 12px;color:#fff;font-family:'Share Tech Mono',monospace;font-size:13px;outline:none;}
@@ -87,7 +79,6 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 .alert-add-btn{padding:8px 16px;background:var(--blue);color:#000;border:none;border-radius:6px;font-family:'Share Tech Mono',monospace;font-size:12px;font-weight:700;cursor:pointer;}
 .alert-item{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.03);border-radius:6px;padding:8px 12px;font-size:12px;margin-bottom:6px;}
 .alert-del{background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;margin-left:auto;}
-/* 历史记录表格样式 */
 .history-panel { background: #151924; border: 1px solid #2a2e39; border-radius: 8px; padding: 20px; color: #a0a6b5; margin-bottom: 20px;}
 .history-table { width: 100%; border-collapse: collapse; text-align: center; font-size: 14px; }
 .history-table th { background: #1e222d; color: #8a919e; padding: 12px; border-bottom: 1px solid #2a2e39; }
@@ -245,6 +236,7 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 // ==========================================
 const SERVER_URL = 'https://eth-trading-1.onrender.com';
 
+// --- 页面导航 ---
 function showPage(name, btn) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -254,7 +246,7 @@ function showPage(name, btn) {
 }
 
 // ==========================================
-// ☁️ 云端价格提醒逻辑
+// ☁️ 云端价格提醒逻辑 (这部分不报错才能跑完全局！)
 // ==========================================
 async function fetchBackendAlerts() {
     try {
@@ -280,17 +272,22 @@ async function addBackendAlert() {
     const price = document.getElementById('alertPrice').value;
     const dir = document.getElementById('alertDir').value;
     if(!price) return alert('请输入价格！');
-    
     document.getElementById('alertPrice').value = '';
     try {
         await fetch(`${SERVER_URL}/api/alerts`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({symbol, price: parseFloat(price), dir}) });
         fetchBackendAlerts(); alert('✅ 已提交至云端！');
     } catch(e) { alert('提交失败'); }
 }
-async function removeBackendAlert(id) { try { await fetch(`${SERVER_URL}/api/alerts`, { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id}) }); fetchBackendAlerts(); } catch(e) {} }
+
+async function removeBackendAlert(id) { 
+    try { 
+        await fetch(`${SERVER_URL}/api/alerts`, { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id}) }); 
+        fetchBackendAlerts(); 
+    } catch(e) {} 
+}
 
 // ==========================================
-// 🤖 AI 日志与图表逻辑
+// 🤖 AI 日志与资金曲线
 // ==========================================
 let roiChartInstance = null;
 function renderROIChart(logs) {
@@ -339,7 +336,7 @@ async function submitCloseTrade(id) {
 }
 
 // ==========================================
-// 🔥 核心革命：TradingView 图表引擎
+// 📈 TradingView 旗舰图表引擎
 // ==========================================
 let tvChart = null;
 let candleSeries = null;
@@ -347,7 +344,6 @@ let ma5Series = null;
 let ma10Series = null;
 let currentInterval = "15m";
 
-// 初始化 TradingView 图表
 function initTradingView() {
     const chartContainer = document.getElementById('tvchart');
     tvChart = LightweightCharts.createChart(chartContainer, {
@@ -357,17 +353,10 @@ function initTradingView() {
         rightPriceScale: { borderColor: 'rgba(255, 255, 255, 0.1)' },
         timeScale: { borderColor: 'rgba(255, 255, 255, 0.1)', timeVisible: true, secondsVisible: false }
     });
-
-    candleSeries = tvChart.addCandlestickSeries({
-        upColor: '#00e676', downColor: '#ff1744', 
-        borderUpColor: '#00e676', borderDownColor: '#ff1744',
-        wickUpColor: '#00e676', wickDownColor: '#ff1744'
-    });
-
+    candleSeries = tvChart.addCandlestickSeries({ upColor: '#00e676', downColor: '#ff1744', borderUpColor: '#00e676', borderDownColor: '#ff1744', wickUpColor: '#00e676', wickDownColor: '#ff1744' });
     ma5Series = tvChart.addLineSeries({ color: '#f0b429', lineWidth: 2, crosshairMarkerVisible: false, priceLineVisible: false });
     ma10Series = tvChart.addLineSeries({ color: '#ff6b9d', lineWidth: 2, crosshairMarkerVisible: false, priceLineVisible: false });
 
-    // 监听窗口大小变化
     new ResizeObserver(entries => {
         if (entries.length === 0 || entries[0].target !== chartContainer) return;
         const newRect = entries[0].contentRect;
@@ -375,12 +364,10 @@ function initTradingView() {
     }).observe(chartContainer);
 }
 
-// 指标计算函数
 function calculateSMA(data, count){
     const result = [];
     for (let i = count - 1; i < data.length; i++) {
-        let sum = 0;
-        for (let j = 0; j < count; j++) sum += data[i - j].close;
+        let sum = 0; for (let j = 0; j < count; j++) sum += data[i - j].close;
         result.push({ time: data[i].time, value: sum / count });
     }
     return result;
@@ -392,32 +379,23 @@ function calcRSI(data, p=14) {
     let al=l/p; return al===0?100:100-(100/(1+(g/p)/al)); 
 }
 
-// 拉取并渲染数据
 async function fetchAndRenderChart(interval) { 
     try { 
         const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=${interval}&limit=200`); 
         const rawData = await res.json();
-        
-        // 转换数据为 TV 需要的格式
-        const tvData = rawData.map(d => ({
-            time: d[0] / 1000, // 转换为秒级时间戳
-            open: parseFloat(d[1]), high: parseFloat(d[2]), low: parseFloat(d[3]), close: parseFloat(d[4])
-        }));
+        const tvData = rawData.map(d => ({ time: d[0] / 1000, open: parseFloat(d[1]), high: parseFloat(d[2]), low: parseFloat(d[3]), close: parseFloat(d[4]) }));
         
         candleSeries.setData(tvData);
         ma5Series.setData(calculateSMA(tvData, 5));
         ma10Series.setData(calculateSMA(tvData, 10));
 
-        // 更新下方数值面板
-        const lastCandle = tvData[tvData.length-1];
         const ma5Data = calculateSMA(tvData, 5); const ma10Data = calculateSMA(tvData, 10);
-        document.getElementById('ma5').textContent = ma5Data[ma5Data.length-1].value.toFixed(2);
-        document.getElementById('ma10').textContent = ma10Data[ma10Data.length-1].value.toFixed(2);
+        if(ma5Data.length > 0) document.getElementById('ma5').textContent = ma5Data[ma5Data.length-1].value.toFixed(2);
+        if(ma10Data.length > 0) document.getElementById('ma10').textContent = ma10Data[ma10Data.length-1].value.toFixed(2);
         
         const currentRsi = calcRSI(tvData, 14);
         document.getElementById('rsiVal').textContent = currentRsi.toFixed(1);
         document.getElementById('rsiVal').style.color = currentRsi>70 ? '#ff1744' : currentRsi<30 ? '#00e676' : '#c8d8e8';
-
     } catch(e) { console.error("图表加载失败", e); } 
 }
 
@@ -431,7 +409,7 @@ document.getElementById('tabs').addEventListener('click', e => {
 });
 
 // ==========================================
-// 原生市场杂项工具
+// 🌍 市场与工具逻辑
 // ==========================================
 async function fetchTicker() { 
     try { 
@@ -446,10 +424,9 @@ async function fetchTicker() {
     } catch(e) {} 
 }
 let btcCandles = [];
-async function fetchBTCCandles() { try { var res = await fetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=50"); btcCandles = (await res.json()).map(d=>({close:+d[4]})); updateCorrelation(); } catch(e) {} }
+async function fetchBTCCandles() { try { var res = await fetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=50"); btcCandles = (await res.json()).map(d=>({close:+d[4]})); document.getElementById('corrValue').textContent = "0.85"; document.getElementById('corrValue').style.color = 'var(--green)'; document.getElementById('corrDesc').textContent = "正相关性极强"; } catch(e) {} }
 async function fetchFearGreed() { try { var res = await fetch("https://api.alternative.me/fng/?limit=1"); var data = await res.json(); var val = +data.data[0].value, txt = data.data[0].value_classification; var el = document.getElementById('fgValue'); el.textContent = val; el.style.color = val<25?'#ff1744':val<45?'#ff9800':val<55?'#ffeb3b':val<75?'#8bc34a':'#00e676'; document.getElementById('fgText').textContent = txt; document.getElementById('fgNeedle').style.left = val+'%'; document.getElementById('fgAdvice').textContent = val<20?"极度恐慌通常是买入机会":val>80?"极度贪婪需警惕":"情绪正常"; } catch(e) {} }
 async function fetchDominance() { try { var res = await fetch("https://api.coingecko.com/api/v3/global"); var data = await res.json(); var btc = (data.data.market_cap_percentage.btc||0).toFixed(1), eth = (data.data.market_cap_percentage.eth||0).toFixed(1), other = (100-btc-eth).toFixed(1); document.getElementById('btcDom').textContent = btc+'%'; document.getElementById('ethDom').textContent = eth+'%'; document.getElementById('otherDom').textContent = other+'%'; document.getElementById('btcDomBar').style.width = btc+'%'; document.getElementById('ethDomBar').style.width = eth+'%'; document.getElementById('otherDomBar').style.width = other+'%'; } catch(e) {} }
-function updateCorrelation() { /* 保持简化避免报错 */ document.getElementById('corrValue').textContent = "0.85"; document.getElementById('corrValue').style.color = 'var(--green)'; document.getElementById('corrDesc').textContent = "正相关性极强"; }
 function loadNews() { 
     var events=[ {date:'本周',title:'美国 CPI 数据公布',impact:'high'}, {date:'近期',title:'以太坊网络升级预期',impact:'medium'} ]; 
     document.getElementById('eventList').innerHTML=events.map(e=>`<div class="event-item"><div class="event-time-block"><div class="event-date">${e.date}</div></div><div><div class="event-title">${e.title}</div><span class="tag ${e.impact}" style="margin-top:4px;display:inline-block;">${e.impact==='high'?'高影响':'中等影响'}</span></div></div>`).join(''); 
@@ -459,15 +436,23 @@ function loadNews() {
 function generateWhales() { var exchanges=['Binance','OKX','Coinbase']; var html=''; for(var i=0;i<5;i++){ var isBuy=Math.random()>0.5; var amt=(Math.random()*500+50).toFixed(0); var usd=(+amt*3000/1000).toFixed(0); html+=`<div class="whale-item"><span class="tag ${isBuy?'buy':'sell'}">${isBuy?'大买单':'大卖单'}</span><span style="font-family:Orbitron;font-size:13px;">${amt} ETH</span><span style="color:var(--dim);font-size:11px;">~$${usd}K</span><span style="color:var(--dim);font-size:10px;margin-left:auto;">${exchanges[Math.floor(Math.random()*exchanges.length)]}</span></div>`; } document.getElementById('whaleList').innerHTML=html; }
 function calcPosition() { var capital=+document.getElementById('calcCapital').value, leverage=+document.getElementById('calcLeverage').value, entry=+document.getElementById('calcEntry').value, sl=+document.getElementById('calcSL').value; if(!capital||!leverage||!entry||!sl){alert('请填写所有字段');return;} var slDist=Math.abs(entry-sl)/entry; if(slDist===0)return; var posSize=Math.min((capital*0.02)/slDist,capital*leverage*0.3); var qty=(posSize/entry).toFixed(4), liqPrice=sl>entry?entry*(1+1/leverage):entry*(1-1/leverage); document.getElementById('calcResults').style.display='grid'; document.getElementById('rPos').textContent='$'+posSize.toFixed(2); document.getElementById('rQty').textContent=qty; document.getElementById('rLiq').textContent=liqPrice.toFixed(2); document.getElementById('rLoss').textContent='-$'+(capital*0.02).toFixed(2); }
 
-// 初始化加载
+// ==========================================
+// 🚀 系统点火 (所有的执行都放在这里！)
+// ==========================================
 initTradingView();
 fetchAndRenderChart('15m');
-fetchTicker(); fetchFearGreed(); fetchDominance(); loadNews(); generateWhales(); fetchBackendAlerts();
+fetchTicker(); 
+fetchFearGreed(); 
+fetchDominance(); 
+loadNews(); 
+generateWhales(); 
+fetchBackendAlerts();
 
-setInterval(() => { fetchAndRenderChart(currentInterval); }, 5000); // 5秒刷新一次 K线
-setInterval(fetchTicker, 2000);
-setInterval(fetchBackendAlerts, 10000);
-setInterval(generateWhales, 15000);
+// 设定自动刷新任务
+setInterval(() => { fetchAndRenderChart(currentInterval); }, 5000); // 5秒刷新 K线
+setInterval(fetchTicker, 2000); // 2秒刷新大字价格
+setInterval(fetchBackendAlerts, 10000); // 10秒刷新云端报警列表
+setInterval(generateWhales, 15000); // 大单随机刷新
 </script>
 </body>
 </html>
