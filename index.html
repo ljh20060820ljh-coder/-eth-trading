@@ -366,7 +366,11 @@ var SERVER_URL = 'https://eth-trading-1.onrender.com';
 var EMAILJS_SERVICE_ID = "service_op2rg49";
 var EMAILJS_TEMPLATE_ID = "template_eftwoy6";
 var EMAILJS_PUBLIC_KEY = "tIZB9DwwpEKr3KQpQ";
-var DEEPSEEK_API_KEY = "sk-9afe367ef974483693b3e829b203dd6b";
+
+// 🚨 终极安全处理：前端不再暴露你的真实 DeepSeek Key！
+// 网页上的“手动分析”将受限，但全自动后台依然 24 小时正常运作不受影响。
+var DEEPSEEK_API_KEY = ""; 
+
 var SIGNAL_TIMEOUT_HOURS = 4;
 
 var ejsScript = document.createElement('script');
@@ -457,7 +461,6 @@ async function submitCloseTrade(id) {
     } catch (e) { alert("提交失败，请检查网络或后端状态。"); }
 }
 
-// 原来的计算函数保留，保证前端图表运作正常
 function calcMA(data, p) { return data.map(function(_, i) { if(i < p-1) return null; var s = 0; for(var j = i-p+1; j <= i; j++) s += data[j].close; return s/p; }); }
 function calcRSI(data, p) { p = p || 14; if(data.length < p+1) return null; var g = 0, l = 0; for(var i = data.length-p; i < data.length; i++) { var d = data[i].close - data[i-1].close; if(d > 0) g += d; else l -= d; } var ag = g/p, al = l/p; return al === 0 ? 100 : 100-(100/(1+ag/al)); }
 function calcATR(data, p) { p = p || 14; if(data.length < p+1) return (data[data.length-1].high - data[data.length-1].low) || 10; var sum = 0; var slice = data.slice(-p); for(var i = 0; i < slice.length; i++) { if(i === 0) { sum += slice[i].high-slice[i].low; continue; } sum += Math.max(slice[i].high-slice[i].low, Math.abs(slice[i].high-slice[i-1].close), Math.abs(slice[i].low-slice[i-1].close)); } return sum/p; }
@@ -488,6 +491,16 @@ function checkAlerts() { if(!lastPrice)return; var triggered=[]; priceAlerts.for
 function drawChart() { var data=candleMap[currentInterval]; var canvas=document.getElementById('chart'),ctx=canvas.getContext('2d'); var W=canvas.width,H=canvas.height,pad={top:15,bottom:28,left:8,right:70}; var cW=W-pad.left-pad.right,cH=H-pad.top-pad.bottom; ctx.clearRect(0,0,W,H); var display=(data||[]).slice(-60);if(!display.length)return; var minP=Math.min.apply(null,display.map(function(c){return c.low;}))*0.9994; var maxP=Math.max.apply(null,display.map(function(c){return c.high;}))*1.0006; var range=maxP-minP; function toY(p){return pad.top+cH-((p-minP)/range)*cH;} var gap=cW/display.length,cw=Math.max(1.5,gap*0.62); for(var i=0;i<=5;i++){ var y=pad.top+(cH/5)*i; ctx.strokeStyle='rgba(255,255,255,0.04)';ctx.lineWidth=1; ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(W-pad.right,y);ctx.stroke(); ctx.fillStyle='rgba(200,216,232,0.4)';ctx.font='10px monospace'; ctx.fillText((maxP-(range/5)*i).toFixed(1),W-pad.right+5,y+4); } if(currentTPSL&&inPosition){ [{p:currentTPSL.sl,c:'rgba(255,23,68,0.7)',l:'SL'},{p:currentTPSL.tp1,c:'rgba(0,230,118,0.6)',l:'TP1'},{p:currentTPSL.tp2,c:'rgba(0,230,118,0.9)',l:'TP2'}].forEach(function(line){ if(line.p<minP||line.p>maxP)return; var ly=toY(line.p); ctx.setLineDash([5,4]);ctx.strokeStyle=line.c;ctx.lineWidth=1; ctx.beginPath();ctx.moveTo(pad.left,ly);ctx.lineTo(W-pad.right-2,ly);ctx.stroke(); ctx.setLineDash([]);ctx.fillStyle=line.c;ctx.font='bold 10px monospace'; ctx.fillText(line.l,W-pad.right+5,ly+4); }); } [[calcMA(display,5),'#f0b429',1.5],[calcMA(display,10),'#ff6b9d',1.5],[calcMA(display,20),'#00cfff',1.5]].forEach(function(mc){ ctx.beginPath();ctx.strokeStyle=mc[1];ctx.lineWidth=mc[2];var started=false; mc[0].forEach(function(v,i){if(!v)return;var x=pad.left+gap*i+gap/2;if(!started){ctx.moveTo(x,toY(v));started=true;}else ctx.lineTo(x,toY(v));}); ctx.stroke(); }); display.forEach(function(c,i){ var x=pad.left+gap*i+gap/2,color=c.close>=c.open?'#00e676':'#ff1744'; ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=1; ctx.beginPath();ctx.moveTo(x,toY(c.high));ctx.lineTo(x,toY(c.low));ctx.stroke(); var bTop=toY(Math.max(c.open,c.close)),bH=Math.max(1.5,Math.abs(toY(c.open)-toY(c.close))); ctx.fillRect(x-cw/2,bTop,cw,bH); }); }
 document.getElementById('tabs').addEventListener('click',function(e){ var btn=e.target.closest('.tab');if(!btn)return; document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active');}); btn.classList.add('active');currentInterval=btn.dataset.iv; document.getElementById('chartLoading').style.display='flex'; fetchCandles(currentInterval); });
 async function fetchServerStatus() { if (!SERVER_URL) return; try { var res = await fetch(SERVER_URL + '/status'); var data = await res.json(); document.getElementById('monitorToggle').checked = data.enabled; var statusEl = document.getElementById('switchStatus'); statusEl.textContent = data.enabled ? '开启中 · 后台自动盯盘中' : '连接中断'; statusEl.className = 'switch-status ' + (data.enabled ? 'on' : 'off'); } catch(e) {} }
+
+// ⚠️ 安全升级：拦截前端的 API 分析请求
+async function requestAIAnalysis() {
+    var panel = document.getElementById('aiPanel'), content = document.getElementById('aiContent');
+    panel.style.display = 'block';
+    if (!DEEPSEEK_API_KEY) {
+        content.innerHTML = '<div style="color:var(--gold);font-size:12px;padding: 10px; background: rgba(240, 180, 41, 0.1); border-radius: 6px; border: 1px solid rgba(240, 180, 41, 0.3);">⚠️ 出于资金安全考虑，前端页面的明文 API Key 已被物理剥离。<br><br>👉 <b>您的 Render 自动盯盘后台不受任何影响</b>，依然在 24 小时全天候运行并为您发送进出场邮件！</div>';
+        return;
+    }
+}
 
 // Init
 renderAlerts();
