@@ -11,7 +11,8 @@ const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
 const TIMEFRAMES = ["5m", "15m", "1h", "4h"]; 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; 
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY; 
+// 🔥 切回 DeepSeek 的 API KEY
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY; 
 const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY;
 const KV_REST_API_TOKEN = process.env.KV_REST_API_TOKEN;
 const SERVERCHAN_SENDKEY = process.env.SERVERCHAN_SENDKEY; 
@@ -22,7 +23,7 @@ let lastPrices = { BTCUSDT: null, ETHUSDT: null, SOLUSDT: null };
 let cachedNews = []; 
 let isMonitoringActive = true; 
 
-console.log("🚀 量化 AI (Gemini 1.5 稳定闪电引擎) 已上线...");
+console.log("🚀 量化 AI (DeepSeek 批处理融合版) 已上线...");
 
 function postJSON(url, body, extraHeaders) {
   return new Promise((resolve, reject) => {
@@ -44,7 +45,7 @@ function postJSON(url, body, extraHeaders) {
 
 function fetchJSON(url, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'Crypto-Monitor/13.6', ...extraHeaders } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': 'Crypto-Monitor/14.0', ...extraHeaders } }, (res) => {
       let data = ''; res.on('data', chunk => data += chunk);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } });
     }).on('error', reject);
@@ -64,8 +65,9 @@ function calcMA(data, period) { if (data.length < period) return 0; return data.
 function calcRSI(data, period = 14) { if (data.length < period + 1) return 50; let gains = 0, losses = 0; for (let i = data.length - period; i < data.length; i++) { const diff = data[i].close - data[i-1].close; if (diff > 0) gains += diff; else losses -= diff; } const avgLoss = losses / period; if (avgLoss === 0) return 100; return 100 - (100 / (1 + (gains / period) / avgLoss)); }
 function calcATR(data, period = 14) { if (data.length < period + 1) return 0; let sumTR = 0; for (let i = data.length - period; i < data.length; i++) { const high = data[i].high, low = data[i].low, prevClose = data[i-1].close; sumTR += Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)); } return sumTR / period; }
 
+// 🔥 新闻分析切回 DeepSeek 引擎
 async function fetchAndAnalyzeNews() {
-    if (!GEMINI_API_KEY) { console.error("❌ 未找到 GEMINI_API_KEY"); return; }
+    if (!DEEPSEEK_API_KEY) { console.error("❌ 未找到 DEEPSEEK_API_KEY"); return; }
     try {
         const res = await fetchJSON('https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Fcointelegraph.com%2Frss');
         if (!res || !res.items) return;
@@ -74,32 +76,30 @@ async function fetchAndAnalyzeNews() {
 1. date：转为北京时间(MM-DD HH:mm)。2. type："bull", "bear", "neutral"。
 英文新闻：\n${topNews.map(n => n.pubDate + ' | ' + n.title).join('\n')}`;
 
-        // 🔥 使用最稳健的 1.5-flash 模型
-        const aiRes = await postJSON(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
-            contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3 }
-        });
+        const aiRes = await postJSON("https://api.deepseek.com/chat/completions", {
+            model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.3 
+        }, { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` });
         
-        if (!aiRes.candidates) throw new Error(JSON.stringify(aiRes));
-        let jsonStr = aiRes.candidates[0].content.parts[0].text.replace(/```json/gi, '').replace(/```/g, '').trim();
+        let jsonStr = aiRes.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```json/gi, '').replace(/```/g, '').trim();
         cachedNews = JSON.parse(jsonStr).map((item, i) => ({ ...item, link: topNews[i].link }));
-        console.log("📰 Gemini 新闻翻译完成！");
+        console.log("📰 DeepSeek 新闻翻译完成！");
     } catch(e) { console.error("新闻分析失败:", e.message); }
 }
 
+// 🔥 批量交易决策切回 DeepSeek 引擎
 async function askAIBatchDecisions(batchData) {
-  if (!GEMINI_API_KEY || batchData.length === 0) return [];
+  if (!DEEPSEEK_API_KEY || batchData.length === 0) return [];
   const prompt = `你是顶级量化模型。请一次性分析以下 ${batchData.length} 组加密货币数据。
 数据：${JSON.stringify(batchData)}
 【战术】: 极速偏离超1.5倍ATR给 "AGGRESSIVE"，否则给 "STEADY" 或 "WAIT"。
 严格返回 JSON 数组：[{"symbol": "BTCUSDT", "timeframe": "15m", "direction": "WAIT", "style": "STEADY", "win_rate": 0, "sl": 0, "tp1": 0, "tp2": 0, "reason": "理由简述"}]`;
 
   try {
-    // 🔥 使用最稳健的 1.5-flash 模型
-    const res = await postJSON(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
-        contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.2 }
-    });
-    if (!res.candidates) throw new Error(JSON.stringify(res));
-    let jsonStr = res.candidates[0].content.parts[0].text.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const res = await postJSON("https://api.deepseek.com/chat/completions", {
+        model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.2 
+    }, { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` });
+    
+    let jsonStr = res.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```json/gi, '').replace(/```/g, '').trim();
     return JSON.parse(jsonStr);
   } catch (e) { console.error("批量分析失败:", e.message); return []; }
 }
@@ -146,9 +146,9 @@ async function runMonitor() {
           if (targetDir === 'WAIT') {
               if (positions[posKey] !== null) { signalTitle = `【平仓警报】`; positions[posKey] = null; } else continue;
           } else {
-              if (isAggressive && winRate < 60) continue; 
-              if (positions[posKey] === null) signalTitle = `【Gemini 指令】${styleStr}${actionStr}`; 
-              else signalTitle = `【Gemini 反手】${styleStr}${actionStr}`;
+              if (isAggressive && winRate < 60) continue; // 依然保留60%容易出单的门槛
+              if (positions[posKey] === null) signalTitle = `【DeepSeek 指令】${styleStr}${actionStr}`; 
+              else signalTitle = `【DeepSeek 反手】${styleStr}${actionStr}`;
               positions[posKey] = targetDir; 
               await addTradeLog(aiObj.symbol, aiObj.timeframe, actionStr, styleStr, price); 
           }
@@ -175,8 +175,8 @@ http.createServer(async (req, res) => {
   if (req.url === '/api/news' && req.method === 'GET') { res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(cachedNews)); return; }
 
   if (req.url === '/api/test-signal') {
-      sendWeChatPush("【Gemini 测试】", "API 秘钥全新就位！系统全通！");
-      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'}); res.end("<h2 style='color:green;text-align:center'>✅ API Key 验证成功！系统全通！</h2>"); return;
+      sendWeChatPush("【DeepSeek 测试】", "API 秘钥部署完成！系统全通！");
+      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'}); res.end("<h2 style='color:green;text-align:center'>✅ DeepSeek 验证成功！系统全通！</h2>"); return;
   }
   if (req.url === '/api/close' && req.method === 'POST') {
       let body = ''; req.on('data', c => body += c.toString());
@@ -210,7 +210,7 @@ http.createServer(async (req, res) => {
 }).listen(process.env.PORT || 3000);
 
 async function startApp() {
-    console.log("🚀 启动！Gemini 1.5 稳定引擎准备就绪！");
+    console.log("🚀 启动！DeepSeek 批处理引擎准备就绪！");
     fetchAndAnalyzeNews(); 
     setInterval(fetchAndAnalyzeNews, 30 * 60 * 1000); 
     setInterval(runMonitor, CHECK_INTERVAL_MS); 
