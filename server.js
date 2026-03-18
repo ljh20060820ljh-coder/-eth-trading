@@ -12,7 +12,8 @@ const TIMEFRAMES = ["5m", "15m", "1h", "4h"];
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; 
 const ALERT_CHECK_INTERVAL = 10 * 1000;  
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY; 
+// 注意要保留双引号！
+const GEMINI_API_KEY = "AIzaSyCQ2ZQ9ODtmbJ5G5mzUB_Lm1uFhSMuIK5M";
 const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY;
 const KV_REST_API_TOKEN = process.env.KV_REST_API_TOKEN;
 const SERVERCHAN_SENDKEY = process.env.SERVERCHAN_SENDKEY; 
