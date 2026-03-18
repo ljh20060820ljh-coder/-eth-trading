@@ -85,6 +85,9 @@ canvas{width:100% !important;height:auto !important;display:block;}
 .ai-panel{background:var(--bg2);border-radius:10px;padding:16px;margin-bottom:16px;border:1px solid rgba(167,139,250,0.3);}
 .ai-panel-title{font-size:10px;letter-spacing:3px;color:var(--purple);margin-bottom:12px;}
 .ai-content{font-size:12px;line-height:1.8;color:var(--text);}
+.ai-bull{color:var(--green);font-weight:700;}
+.ai-bear{color:var(--red);font-weight:700;}
+.ai-neutral{color:var(--gold);}
 .ai-ask-btn{margin-top:10px;padding:8px 16px;background:rgba(167,139,250,0.2);border:1px solid rgba(167,139,250,0.4);border-radius:6px;color:var(--purple);font-family:'Share Tech Mono',monospace;font-size:12px;cursor:pointer;}
 .email-panel{background:var(--bg2);border:1px solid rgba(240,180,41,0.2);border-radius:10px;padding:16px;margin-bottom:16px;}
 .panel-title{font-size:10px;color:var(--gold);letter-spacing:3px;margin-bottom:12px;}
@@ -298,6 +301,17 @@ canvas{width:100% !important;height:auto !important;display:block;}
       <div class="calc-result-item"><div class="calc-result-label">最大亏损</div><div class="calc-result-value" id="rLoss" style="color:var(--red)">--</div></div>
     </div>
   </div>
+  
+  <div class="section-title">价格提醒</div>
+  <div class="panel">
+    <div class="alert-row">
+      <input class="alert-input" id="alertPrice" type="number" placeholder="输入目标价格"/>
+      <select id="alertDir" class="alert-select"><option value="above">涨到</option><option value="below">跌到</option></select>
+      <button class="alert-add-btn" onclick="addAlert()">添加</button>
+    </div>
+    <div id="alertList"></div>
+    <div style="margin-top:8px;font-size:11px;color:var(--dim);">当前价格: <span id="alertCurrentPrice" style="color:var(--gold)">--</span></div>
+  </div>
 </div>
 
 <div class="page" id="page-history">
@@ -350,7 +364,7 @@ function showPage(name, btn) {
 }
 
 // ---------------------------------------------------
-// 【全新功能】：绘制资金曲线 & 抓取 AI 多币种日志
+// 【绘制资金曲线 & 抓取 AI 多币种日志】
 // ---------------------------------------------------
 let roiChartInstance = null;
 
@@ -461,7 +475,7 @@ async function submitCloseTrade(id) {
 }
 
 // ---------------------------------------------------
-// 【保留原有的全部前端看盘逻辑 (K线图、指标、工具等)】
+// 【原生看盘图表与工具逻辑 (完全保留，包括价格提醒)】
 // ---------------------------------------------------
 var currentInterval = "15m";
 var candleMap = {};
@@ -469,6 +483,7 @@ var btcCandles = [];
 var ticker = null;
 var lastPrice = null;
 var INTERVALS = ["1m","15m","1h","4h"];
+var priceAlerts = []; // 🔥 恢复价格提醒数组
 
 function calcMA(data, p) { return data.map(function(_, i) { if(i < p-1) return null; var s = 0; for(var j = i-p+1; j <= i; j++) s += data[j].close; return s/p; }); }
 function calcRSI(data, p) { p = p || 14; if(data.length < p+1) return null; var g = 0, l = 0; for(var i = data.length-p; i < data.length; i++) { var d = data[i].close - data[i-1].close; if(d > 0) g += d; else l -= d; } var ag = g/p, al = l/p; return al === 0 ? 100 : 100-(100/(1+ag/al)); }
@@ -476,18 +491,24 @@ function detectSignal(data) { if(!data || data.length < 22) return null; var ma5
 
 async function fetchCandles(interval) { try { var res = await fetch("https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval="+interval+"&limit=100"); var data = await res.json(); candleMap[interval] = data.map(function(d){return{time:d[0],open:+d[1],high:+d[2],low:+d[3],close:+d[4]};}); if(interval===currentInterval){document.getElementById('chartLoading').style.display='none';drawChart();updateMAs();} } catch(e) {} }
 async function fetchBTCCandles() { try { var res = await fetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=50"); var data = await res.json(); btcCandles = data.map(function(d){return{close:+d[4]};}); updateCorrelation(); } catch(e) {} }
-async function fetchTicker() { try { var r1 = await fetch("https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT"); ticker = await r1.json(); updatePrice(); } catch(e) {} }
+async function fetchTicker() { try { var r1 = await fetch("https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT"); ticker = await r1.json(); updatePrice(); checkAlerts(); } catch(e) {} }
 async function fetchFearGreed() { try { var res = await fetch("https://api.alternative.me/fng/?limit=1"); var data = await res.json(); var val = +data.data[0].value, txt = data.data[0].value_classification; var el = document.getElementById('fgValue'); el.textContent = val; el.style.color = val<25?'#ff1744':val<45?'#ff9800':val<55?'#ffeb3b':val<75?'#8bc34a':'#00e676'; document.getElementById('fgText').textContent = txt; document.getElementById('fgNeedle').style.left = val+'%'; document.getElementById('fgAdvice').textContent = val<20?"极度恐慌通常是买入机会":val>80?"极度贪婪需警惕":"情绪正常"; } catch(e) {document.getElementById('fgValue').textContent='--';} }
 async function fetchDominance() { try { var res = await fetch("https://api.coingecko.com/api/v3/global"); var data = await res.json(); var btc = (data.data.market_cap_percentage.btc||0).toFixed(1); var eth = (data.data.market_cap_percentage.eth||0).toFixed(1); var other = (100-+btc-+eth).toFixed(1); document.getElementById('btcDom').textContent = btc+'%'; document.getElementById('ethDom').textContent = eth+'%'; document.getElementById('otherDom').textContent = other+'%'; document.getElementById('btcDomBar').style.width = btc+'%'; document.getElementById('ethDomBar').style.width = eth+'%'; document.getElementById('otherDomBar').style.width = other+'%'; } catch(e) {} }
 
 function updateCorrelation() { var ethData = candleMap['1h']; if(!ethData||ethData.length<20||btcCandles.length<20) return; var n = Math.min(ethData.length,btcCandles.length,30); var ethC = ethData.slice(-n).map(function(c){return c.close;}); var btcC = btcCandles.slice(-n).map(function(c){return c.close;}); var ethR=[],btcR=[]; for(var i=1;i<n;i++){ethR.push((ethC[i]-ethC[i-1])/ethC[i-1]);btcR.push((btcC[i]-btcC[i-1])/btcC[i-1]);} var avgE=ethR.reduce(function(a,b){return a+b;},0)/ethR.length; var avgB=btcR.reduce(function(a,b){return a+b;},0)/btcR.length; var num=0,de=0,db=0; for(var i=0;i<ethR.length;i++){num+=(ethR[i]-avgE)*(btcR[i]-avgB);de+=Math.pow(ethR[i]-avgE,2);db+=Math.pow(btcR[i]-avgB,2);} var corr=num/Math.sqrt(de*db); var el=document.getElementById('corrValue'); el.textContent=corr.toFixed(2); el.style.color=corr>0.7?'var(--green)':corr<0.3?'var(--red)':'var(--gold)'; document.getElementById('corrDesc').textContent="近30根1小时K线相关系数"; }
 function generateWhales() { var exchanges=['Binance','OKX','Coinbase','Bybit']; var html=''; for(var i=0;i<5;i++){ var isBuy=Math.random()>0.5; var amt=(Math.random()*500+50).toFixed(0); var usd=(+amt*(lastPrice||2100)/1000).toFixed(0); var mins=Math.floor(Math.random()*60); var ex=exchanges[Math.floor(Math.random()*exchanges.length)]; html+='<div class="whale-item"><span class="tag '+(isBuy?'buy':'sell')+'">'+(isBuy?'大买单':'大卖单')+'</span><span style="font-family:Orbitron,monospace;font-size:13px;">'+( +amt).toLocaleString()+' ETH</span><span style="color:var(--dim);font-size:11px;">~$'+usd+'K</span><span style="color:var(--dim);font-size:10px;">'+ex+'</span><span style="color:var(--dim);font-size:11px;margin-left:auto;">'+mins+'分钟前</span></div>'; } document.getElementById('whaleList').innerHTML=html; }
 function loadNews() { var events=[ {date:'03/19',time:'02:00',title:'美联储FOMC利率决议',desc:'美联储公布最新利率决定',impact:'high'}, {date:'03/20',time:'全天',title:'以太坊网络活动激增',desc:'链上活跃地址达新高',impact:'medium'}, {date:'03/25',time:'22:30',title:'美国GDP数据公布',desc:'宏观经济数据影响',impact:'medium'} ]; document.getElementById('eventList').innerHTML=events.map(function(e){ return '<div class="event-item"><div class="event-time-block"><div class="event-date">'+e.date+'</div><div class="event-clock">'+e.time+'</div></div><div><div class="event-title">'+e.title+'</div><div class="event-desc">'+e.desc+'</div><span class="tag '+e.impact+'" style="margin-top:4px;display:inline-block;">'+(e.impact==='high'?'高影响':'中等影响')+'</span></div></div>'; }).join(''); var news=[ {tag:'bull',title:'大型机构开始囤积ETH，预期长期看涨',time:'1小时前',impact:'bull',impactText:'利好'}, {tag:'bear',title:'部分矿工转移资产至交易所，有抛售预期',time:'3小时前',impact:'bear',impactText:'利空'} ]; document.getElementById('newsList').innerHTML=news.map(function(n){ return '<div class="news-item"><div class="news-header"><span class="tag '+n.tag+'">'+(n.tag==='bull'?'利好':'利空')+'</span><span class="news-time">'+n.time+'</span></div><div class="news-title">'+n.title+'</div></div>'; }).join(''); }
-function updatePrice() { if(!ticker) return; var price=+ticker.lastPrice,change=+ticker.priceChangePercent,isUp=change>=0; var el=document.getElementById('priceDisplay'); if(lastPrice!==null){el.className='price-display '+(price>lastPrice?'up':price<lastPrice?'down':'');setTimeout(function(){el.className='price-display';},600);} lastPrice=price; el.textContent=price.toLocaleString('en-US',{minimumFractionDigits:2}); var b=document.getElementById('changeBadge'); b.className='change-badge '+(isUp?'up':'down'); b.textContent=(isUp?'▲ ':'▼ ')+Math.abs(change).toFixed(2)+'% 24H'; document.getElementById('high24').textContent=(+ticker.highPrice).toFixed(2); document.getElementById('low24').textContent=(+ticker.lowPrice).toFixed(2); var vol=+ticker.volume; document.getElementById('vol24').textContent=vol>1000?(vol/1000).toFixed(1)+'K':vol.toFixed(0); }
+function updatePrice() { if(!ticker) return; var price=+ticker.lastPrice,change=+ticker.priceChangePercent,isUp=change>=0; var el=document.getElementById('priceDisplay'); if(lastPrice!==null){el.className='price-display '+(price>lastPrice?'up':price<lastPrice?'down':'');setTimeout(function(){el.className='price-display';},600);} lastPrice=price; el.textContent=price.toLocaleString('en-US',{minimumFractionDigits:2}); var b=document.getElementById('changeBadge'); b.className='change-badge '+(isUp?'up':'down'); b.textContent=(isUp?'▲ ':'▼ ')+Math.abs(change).toFixed(2)+'% 24H'; document.getElementById('high24').textContent=(+ticker.highPrice).toFixed(2); document.getElementById('low24').textContent=(+ticker.lowPrice).toFixed(2); var vol=+ticker.volume; document.getElementById('vol24').textContent=vol>1000?(vol/1000).toFixed(1)+'K':vol.toFixed(0); document.getElementById('alertCurrentPrice').textContent=price.toFixed(2); }
 function updateMAs() { var data=candleMap[currentInterval];if(!data||data.length<20)return; var ma5v=calcMA(data,5),ma10v=calcMA(data,10),ma20v=calcMA(data,20); document.getElementById('ma5').textContent=(ma5v[ma5v.length-1]||0).toFixed(2); document.getElementById('ma10').textContent=(ma10v[ma10v.length-1]||0).toFixed(2); document.getElementById('ma20').textContent=(ma20v[ma20v.length-1]||0).toFixed(2); var rsi=calcRSI(data); if(rsi){var rsiEl=document.getElementById('rsiVal');rsiEl.textContent=rsi.toFixed(1);rsiEl.style.color=rsi>70?'#ff1744':rsi<30?'#00e676':'#c8d8e8';} updateResonance();updateSignal(); }
 function updateResonance() { var ivs=['1m','15m','1h','4h'],ids=['res1m','res15m','res1h','res4h']; var longCount=0,shortCount=0; ivs.forEach(function(iv,i){ var sig=detectSignal(candleMap[iv]); var el=document.getElementById(ids[i]);if(!el)return; if(sig&&sig.type==='LONG'){el.className='res-dot active-long';longCount++;} else if(sig&&sig.type==='SHORT'){el.className='res-dot active-short';shortCount++;} else el.className='res-dot'; }); var el=document.getElementById('resonanceSignal'); if(longCount>=3){el.textContent=longCount+'/4 周期做多共振';el.style.color='var(--green)';} else if(shortCount>=3){el.textContent=shortCount+'/4 周期做空共振';el.style.color='var(--red)';} else if(longCount>shortCount){el.textContent=longCount+'/4 偏多';el.style.color='rgba(0,230,118,0.6)';} else if(shortCount>longCount){el.textContent=shortCount+'/4 偏空';el.style.color='rgba(255,23,68,0.6)';} else{el.textContent='信号混乱，观望';el.style.color='var(--dim)';} }
 function updateSignal() { var data=candleMap[currentInterval];if(!data)return; var sig=detectSignal(data); var box=document.getElementById('signalBox'),val=document.getElementById('signalValue'); if(sig){ box.className='signal-box '+sig.cssClass;val.textContent=sig.label; } else { box.className='signal-box none';val.textContent='无明显趋势'; } }
+
+// 🔥 恢复的工具区逻辑 (计算器 + 价格提醒)
 function calcPosition() { var capital=+document.getElementById('calcCapital').value; var leverage=+document.getElementById('calcLeverage').value; var entry=+document.getElementById('calcEntry').value||lastPrice; var sl=+document.getElementById('calcSL').value; if(!capital||!leverage||!entry||!sl){alert('请填写所有字段');return;} var slDist=Math.abs(entry-sl)/entry; if(slDist===0){alert('入场价和止损价不能相同');return;} var posSize=Math.min((capital*0.02)/slDist,capital*leverage*0.3); var qty=(posSize/entry).toFixed(4); var liqPrice=sl>entry?entry*(1+1/leverage):entry*(1-1/leverage); document.getElementById('calcResults').style.display='grid'; document.getElementById('rPos').textContent='$'+posSize.toFixed(2); document.getElementById('rQty').textContent=qty+' ETH'; document.getElementById('rLiq').textContent=liqPrice.toFixed(2); document.getElementById('rLoss').textContent='-$'+(capital*0.02).toFixed(2)+' (-2%)'; }
+function addAlert() { var price=+document.getElementById('alertPrice').value; var dir=document.getElementById('alertDir').value; if(!price)return; priceAlerts.push({price:price,dir:dir,id:Date.now()}); document.getElementById('alertPrice').value=''; renderAlerts(); }
+function removeAlert(id) { priceAlerts=priceAlerts.filter(function(a){return a.id!==id;});renderAlerts(); }
+function renderAlerts() { var el=document.getElementById('alertList'); if(!priceAlerts.length){el.innerHTML='<div style="color:var(--dim);font-size:11px;">暂无提醒</div>';return;} el.innerHTML=priceAlerts.map(function(a){ return '<div class="alert-item"><span style="color:var(--dim);font-size:10px;">'+(a.dir==='above'?'涨到':'跌到')+'</span><span style="font-family:Orbitron,monospace;color:'+(a.dir==='above'?'var(--green)':'var(--red)')+'">'+a.price.toLocaleString('en-US',{minimumFractionDigits:2})+'</span><button class="alert-del" onclick="removeAlert('+a.id+')">x</button></div>'; }).join(''); }
+function checkAlerts() { if(!lastPrice)return; var triggered=[]; priceAlerts.forEach(function(a){ if((a.dir==='above'&&lastPrice>=a.price)||(a.dir==='below'&&lastPrice<=a.price)){ triggered.push(a); alert('【价格提醒】价格已触发: ' + lastPrice.toFixed(2)); } }); if(triggered.length){priceAlerts=priceAlerts.filter(function(a){return!triggered.includes(a);});renderAlerts();} }
 
 function drawChart() { var data=candleMap[currentInterval]; var canvas=document.getElementById('chart'),ctx=canvas.getContext('2d'); var W=canvas.width,H=canvas.height,pad={top:15,bottom:28,left:8,right:70}; var cW=W-pad.left-pad.right,cH=H-pad.top-pad.bottom; ctx.clearRect(0,0,W,H); var display=(data||[]).slice(-60);if(!display.length)return; var minP=Math.min.apply(null,display.map(function(c){return c.low;}))*0.9994; var maxP=Math.max.apply(null,display.map(function(c){return c.high;}))*1.0006; var range=maxP-minP; function toY(p){return pad.top+cH-((p-minP)/range)*cH;} var gap=cW/display.length,cw=Math.max(1.5,gap*0.62); for(var i=0;i<=5;i++){ var y=pad.top+(cH/5)*i; ctx.strokeStyle='rgba(255,255,255,0.04)';ctx.lineWidth=1; ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(W-pad.right,y);ctx.stroke(); ctx.fillStyle='rgba(200,216,232,0.4)';ctx.font='10px monospace'; ctx.fillText((maxP-(range/5)*i).toFixed(1),W-pad.right+5,y+4); } [[calcMA(display,5),'#f0b429',1.5],[calcMA(display,10),'#ff6b9d',1.5],[calcMA(display,20),'#00cfff',1.5]].forEach(function(mc){ ctx.beginPath();ctx.strokeStyle=mc[1];ctx.lineWidth=mc[2];var started=false; mc[0].forEach(function(v,i){if(!v)return;var x=pad.left+gap*i+gap/2;if(!started){ctx.moveTo(x,toY(v));started=true;}else ctx.lineTo(x,toY(v));}); ctx.stroke(); }); display.forEach(function(c,i){ var x=pad.left+gap*i+gap/2,color=c.close>=c.open?'#00e676':'#ff1744'; ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=1; ctx.beginPath();ctx.moveTo(x,toY(c.high));ctx.lineTo(x,toY(c.low));ctx.stroke(); var bTop=toY(Math.max(c.open,c.close)),bH=Math.max(1.5,Math.abs(toY(c.open)-toY(c.close))); ctx.fillRect(x-cw/2,bTop,cw,bH); }); }
 
@@ -505,6 +526,7 @@ async function fetchServerStatus() {
 }
 
 // 页面加载初始化
+renderAlerts(); // 🔥 初始化提醒列表
 INTERVALS.forEach(function(iv){fetchCandles(iv);});
 fetchTicker();fetchBTCCandles();fetchFearGreed();fetchDominance();loadNews();generateWhales();
 
