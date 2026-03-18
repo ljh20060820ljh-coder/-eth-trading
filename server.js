@@ -1,6 +1,9 @@
 const https = require('https');
 const http = require('http');
 
+// ==========================================
+// 🔐 核心配置
+// ==========================================
 const EMAILJS_SERVICE_ID = "service_op2rg49"; 
 const EMAILJS_TEMPLATE_ID = "template_eftwoy6"; 
 const EMAILJS_PUBLIC_KEY = "tIZB9DwwpEKr3KQpQ"; 
@@ -24,8 +27,11 @@ let cachedNews = [];
 let isMonitoringActive = true; 
 let inMemoryDB = { trade_logs: [], price_alerts: [] };
 
-console.log("🚀 量化 AI (DeepSeek 正常挂机版) 已上线...");
+console.log("🚀 量化 AI (终极满血 DeepSeek 版) 已上线...");
 
+// ==========================================
+// 📦 网络请求工具函数
+// ==========================================
 function postJSON(url, body, extraHeaders) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);
@@ -41,51 +47,70 @@ function postJSON(url, body, extraHeaders) {
 
 function fetchJSON(url, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'Crypto-Monitor/15.1', ...extraHeaders } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': 'Crypto-Monitor/15.5', ...extraHeaders } }, (res) => {
       let data = ''; res.on('data', chunk => data += chunk);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } });
     }).on('error', reject);
   });
 }
 
+// ==========================================
+// 📡 通知系统
+// ==========================================
 async function sendWeChatPush(title, desp) { if(SERVERCHAN_SENDKEY) try { await postJSON(`https://sctapi.ftqq.com/${SERVERCHAN_SENDKEY}.send`, { title, desp }); }catch(e){} }
 async function sendSignalEmail(action, messageHtml, price, titleStr, symbol) {
   const time = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
   try { await postJSON("https://api.emailjs.com/api/v1.0/email/send", { service_id: EMAILJS_SERVICE_ID, template_id: EMAILJS_TEMPLATE_ID, user_id: EMAILJS_PUBLIC_KEY, accessToken: EMAILJS_PRIVATE_KEY, template_params: { to_email: NOTIFY_EMAIL, symbol: symbol, interval: titleStr, signal: action, price: price.toString(), message: messageHtml, time: time }}); } catch (e) {}
 }
 
+// ==========================================
+// 💾 数据库存取 (KV + 内存双机制)
+// ==========================================
 async function loadData(key) { 
     if (!KV_REST_API_URL || !KV_REST_API_TOKEN) return inMemoryDB[key] || []; 
     try { const res = await fetchJSON(`${KV_REST_API_URL}/get/${key}`, { Authorization: `Bearer ${KV_REST_API_TOKEN}` }); if (res.result) return typeof res.result === 'string' ? JSON.parse(res.result) : res.result; } catch(e) {} 
-    return []; 
+    return inMemoryDB[key] || []; 
 }
 async function saveData(key, data) { 
-    if (!KV_REST_API_URL || !KV_REST_API_TOKEN) { inMemoryDB[key] = data; return; } 
-    try { await postJSON(`${KV_REST_API_URL}/set/${key}`, data, { Authorization: `Bearer ${KV_REST_API_TOKEN}` }); }catch(e){} 
+    inMemoryDB[key] = data;
+    if (KV_REST_API_URL && KV_REST_API_TOKEN) {
+        try { await postJSON(`${KV_REST_API_URL}/set/${key}`, data, { Authorization: `Bearer ${KV_REST_API_TOKEN}` }); }catch(e){} 
+    }
+}
+async function addTradeLog(symbol, timeframe, action, style, entryPrice) { 
+    const logs = await loadData('trade_logs'); 
+    logs.push({ id: Date.now().toString(), symbol, timeframe, entryTime: new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }), action, style, entryPrice, status: 'OPEN' });
+    await saveData('trade_logs', logs.slice(-50)); // 只保留最近50条
 }
 
+// ==========================================
+// 📊 数学指标算法
+// ==========================================
 function calcMA(data, period) { if (data.length < period) return 0; return data.slice(-period).reduce((sum, c) => sum + c.close, 0) / period; }
 function calcRSI(data, period = 14) { if (data.length < period + 1) return 50; let gains = 0, losses = 0; for (let i = data.length - period; i < data.length; i++) { const diff = data[i].close - data[i-1].close; if (diff > 0) gains += diff; else losses -= diff; } const avgLoss = losses / period; if (avgLoss === 0) return 100; return 100 - (100 / (1 + (gains / period) / avgLoss)); }
 function calcATR(data, period = 14) { if (data.length < period + 1) return 0; let sumTR = 0; for (let i = data.length - period; i < data.length; i++) { const high = data[i].high, low = data[i].low, prevClose = data[i-1].close; sumTR += Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)); } return sumTR / period; }
 
+// ==========================================
+// 🧠 AI 决策引擎
+// ==========================================
 async function fetchAndAnalyzeNews() {
     if (!DEEPSEEK_API_KEY) return;
     try {
         const res = await fetchJSON('https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Fcointelegraph.com%2Frss');
         if (!res || !res.items) return;
         const topNews = res.items.slice(0, 6);
-        const prompt = `分析加密新闻利好利空并翻译。返回 JSON 数组格式。\n英文新闻：\n${topNews.map(n => n.title).join('\n')}`;
+        const prompt = `你是一名加密货币华尔街分析师。翻译以下新闻并分析【利好】或【利空】，附带概率。严格返回 JSON 数组：[{"date":"MM-DD HH:mm", "title":"中文标题", "sentiment":"利好 80%", "type":"bull"}]\n新闻：${topNews.map(n => n.title).join('\n')}`;
         const aiRes = await postJSON("https://api.deepseek.com/chat/completions", {
             model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.3 
         }, { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` });
         let jsonStr = aiRes.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```json/gi, '').replace(/```/g, '').trim();
         cachedNews = JSON.parse(jsonStr).map((item, i) => ({ ...item, link: topNews[i].link }));
-    } catch(e) { cachedNews = [{date: "实时", title: "API繁忙，正在重试新闻...", sentiment: "中性", type: "neutral", link: "#"}]; }
+    } catch(e) { cachedNews = [{date: "系统", title: "新闻引擎繁忙, 正在重试...", sentiment: "中性", type: "neutral", link: "#"}]; }
 }
 
 async function askAIBatchDecisions(batchData) {
   if (!DEEPSEEK_API_KEY || batchData.length === 0) return [];
-  const prompt = `你是一个量化模型。分析数据并返回 JSON 数组格式决策。\n数据：${JSON.stringify(batchData)}`;
+  const prompt = `你是顶级量化机器人。分析以下数据并返回 JSON 数组格式决策：[{"symbol": "BTC", "timeframe": "15m", "direction": "LONG/SHORT/WAIT", "style": "STEADY", "win_rate": 85, "sl": 0, "tp1": 0, "tp2": 0, "reason": "理由"}]\n数据：${JSON.stringify(batchData)}`;
   try {
     const res = await postJSON("https://api.deepseek.com/chat/completions", {
         model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.2 
@@ -95,6 +120,9 @@ async function askAIBatchDecisions(batchData) {
   } catch (e) { return []; }
 }
 
+// ==========================================
+// 🛡️ 核心运行引擎
+// ==========================================
 async function runAlertEngine() {
     try {
         const alerts = await loadData('price_alerts'); if (!alerts || alerts.length === 0) return;
@@ -102,10 +130,10 @@ async function runAlertEngine() {
         const priceMap = {}; res.forEach(item => priceMap[item.symbol] = parseFloat(item.price));
         let triggered = false; const remainingAlerts = [];
         for (const alert of alerts) {
-            const cur = priceMap[alert.symbol];
+            const cur = priceMap[alert.symbol] || priceMap["ETHUSDT"];
             if ((alert.dir === 'above' && cur >= alert.price) || (alert.dir === 'below' && cur <= alert.price)) {
                 await sendWeChatPush(`🚨 价格提醒`, `${alert.symbol} 到达 ${cur}`);
-                await sendSignalEmail("🚨 价格报警", `${alert.symbol} 触发 ${alert.price}`, cur, "实时", alert.symbol);
+                await sendSignalEmail("🚨 价格报警", `${alert.symbol} 触发预设价格 ${alert.price}`, cur, "实时报警", alert.symbol);
                 triggered = true;
             } else { remainingAlerts.push(alert); }
         }
@@ -120,10 +148,12 @@ async function runMonitor() {
       for (const timeframe of TIMEFRAMES) {
           try {
             const data = await fetchJSON(`https://api.binance.us/api/v3/klines?symbol=${symbol}&interval=${timeframe}&limit=30`);
-            const candles = data.map(d => ({ close: +d[4] }));
+            const candles = data.map(d => ({ high: +d[2], low: +d[3], close: +d[4] }));
             lastPrices[symbol] = candles[candles.length - 1].close;
-            const ma5 = calcMA(candles, 5), ma10 = calcMA(candles, 10), rsi = calcRSI(candles, 14);
-            batchData.push({ symbol, timeframe, price: lastPrices[symbol], ma5, ma10, rsi });
+            const ma5 = calcMA(candles, 5), ma10 = calcMA(candles, 10), ma20 = calcMA(candles, 20);
+            const rsi = calcRSI(candles, 14), atr = calcATR(candles, 14);
+            const surgeAlert = Math.abs(candles[candles.length-1].close - candles[candles.length-2].close) > atr * 1.5 ? `🚨极速偏离` : `正常`;
+            batchData.push({ symbol, timeframe, price: lastPrices[symbol], ma5, ma10, ma20, rsi, surgeAlert });
           } catch (e) {}
       }
   }
@@ -131,24 +161,63 @@ async function runMonitor() {
       const results = await askAIBatchDecisions(batchData);
       for (const res of results) {
           const key = `${res.symbol}_${res.timeframe}`;
-          if (res.direction.toUpperCase() === positions[key]) continue;
-          if (res.direction.toUpperCase() !== 'WAIT' && res.win_rate >= 60) {
-              positions[key] = res.direction.toUpperCase();
-              await sendSignalEmail(`🎯 AI: ${res.direction}`, res.reason, lastPrices[res.symbol], res.timeframe, res.symbol);
-              await sendWeChatPush(`AI 信号`, `${res.symbol} ${res.direction}`);
+          const dir = res.direction.toUpperCase();
+          if (dir === positions[key]) continue;
+          if (dir === 'WAIT') {
+              if (positions[key]) {
+                  await sendSignalEmail("🏳️ 平仓信号", res.reason, lastPrices[res.symbol], res.timeframe, res.symbol);
+                  positions[key] = null;
+              }
+          } else if (res.win_rate >= 60) {
+              positions[key] = dir;
+              await sendSignalEmail(`🎯 AI: ${dir}`, res.reason, lastPrices[res.symbol], res.timeframe, res.symbol);
+              await sendWeChatPush(`AI 信号: ${res.symbol}`, `方向: ${dir}\n胜率: ${res.win_rate}%\n逻辑: ${res.reason}`);
+              await addTradeLog(res.symbol, res.timeframe, dir, res.style, lastPrices[res.symbol]);
           }
       }
   }
 }
 
+// ==========================================
+// 🌐 API 接口
+// ==========================================
 http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
+
   if (req.url === '/status') { res.end(JSON.stringify({ status: "alive", isMonitoringActive })); return; }
   if (req.url === '/api/news') { res.end(JSON.stringify(cachedNews)); return; }
-  if (req.url === '/api/toggle-monitor' && req.method === 'POST') { isMonitoringActive = !isMonitoringActive; res.end(JSON.stringify({success:true})); return; }
-  res.end("Running");
+  if (req.url === '/api/logs') { const logs = await loadData('trade_logs'); res.end(JSON.stringify(logs.reverse())); return; }
+  if (req.url === '/api/toggle-monitor' && req.method === 'POST') { isMonitoringActive = !isMonitoringActive; res.end(JSON.stringify({success:true, isMonitoringActive})); return; }
+  if (req.url === '/api/alerts' && req.method === 'GET') { const alerts = await loadData('price_alerts'); res.end(JSON.stringify(alerts)); return; }
+  if (req.url === '/api/alerts' && req.method === 'POST') {
+      let body = ''; req.on('data', c => body += c.toString());
+      req.on('end', async () => {
+          const newAlert = JSON.parse(body); const alerts = await loadData('price_alerts');
+          alerts.push({ id: Date.now().toString(), symbol: newAlert.symbol, price: newAlert.price, dir: newAlert.dir });
+          await saveData('price_alerts', alerts); res.end(JSON.stringify({success: true}));
+      }); return;
+  }
+  if (req.url === '/api/alerts' && req.method === 'DELETE') {
+      let body = ''; req.on('data', c => body += c.toString());
+      req.on('end', async () => {
+          const { id } = JSON.parse(body); let alerts = await loadData('price_alerts'); alerts = alerts.filter(a => a.id !== id);
+          await saveData('price_alerts', alerts); res.end(JSON.stringify({success: true}));
+      }); return;
+  }
+  if (req.url === '/api/test-signal') {
+      await sendWeChatPush("🔔 系统测试", "推送通道畅通！");
+      await sendSignalEmail("✅ 测试邮件", "这是一封来自量化终端的测试邮件。", 0, "TEST", "SYSTEM");
+      res.end("Test Signal Sent"); return;
+  }
+  res.end("System Running");
 }).listen(process.env.PORT || 3000);
 
+// ==========================================
+// 🚀 循环启动
+// ==========================================
 setInterval(fetchAndAnalyzeNews, 30 * 60 * 1000); 
 setInterval(runMonitor, CHECK_INTERVAL_MS); 
 setInterval(runAlertEngine, ALERT_CHECK_INTERVAL);
