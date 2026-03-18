@@ -52,21 +52,24 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 .dom-val{font-family:'Orbitron',monospace;font-size:18px;font-weight:700;}
 .whale-item{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:12px;flex-wrap:wrap;}
 .whale-item:last-child{border-bottom:none;}
-
-/* 🔥 新增的新闻 AI 标签颜色 */
 .tag{font-size:10px;padding:3px 8px;border-radius:3px;}
 .tag.buy{background:rgba(0,230,118,0.15);color:var(--green);}
 .tag.sell{background:rgba(255,23,68,0.15);color:var(--red);}
 .tag.bull{background:rgba(0,230,118,0.15);color:var(--green);}
 .tag.bear{background:rgba(255,23,68,0.15);color:var(--red);}
 .tag.neutral{background:rgba(255,255,255,0.08);color:var(--dim);}
-
 .news-item{padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.05);}
 .news-item:last-child{border-bottom:none;}
 .news-header{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
 .news-title{font-size:13px;color:var(--text);line-height:1.6;}
 .news-title a:hover{color:var(--gold);}
 .news-time{font-size:11px;color:var(--dim);}
+.event-item{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.05);}
+.event-item:last-child{border-bottom:none;}
+.event-time-block{min-width:65px;text-align:center;}
+.event-date{font-size:12px;font-weight:bold;color:var(--gold);}
+.event-title{font-size:13px;color:#fff;margin-bottom:4px;}
+.event-desc{font-size:11px;color:var(--dim);line-height:1.5;}
 .calc-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;}
 .calc-field label{font-size:10px;color:var(--dim);letter-spacing:2px;display:block;margin-bottom:6px;}
 .calc-field input{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:6px;padding:8px 12px;color:#fff;font-family:'Share Tech Mono',monospace;font-size:13px;outline:none;}
@@ -171,7 +174,10 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 </div>
 
 <div class="page" id="page-news">
-  <div class="section-title">AI 全球头条情绪解析</div>
+  <div class="section-title">📅 未来宏观大事件预告 (大盘风向标)</div>
+  <div class="panel" id="eventList"></div>
+
+  <div class="section-title">🧠 AI 全球头条情绪解析 (深度翻译与判断)</div>
   <div class="panel" id="newsList"><div style="color:var(--dim);font-size:12px;">AI 后端主编正在搜集翻译全球情报并分析情绪概率，请稍候...</div></div>
 </div>
 
@@ -242,12 +248,13 @@ function showPage(name, btn) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
   if(btn) btn.classList.add('active');
+  
   if(name === 'history') fetchAILogs(); 
-  if(name === 'news') loadAINews(); // 切到资讯页拉取AI新闻
+  if(name === 'news') loadAINews(); // 点击资讯页自动拉取AI新闻
 }
 
 // ==========================================
-// ☁️ 云端报警逻辑
+// ☁️ 云端报警、AI日志等功能
 // ==========================================
 async function fetchBackendAlerts() {
     try {
@@ -280,9 +287,6 @@ async function addBackendAlert() {
 }
 async function removeBackendAlert(id) { try { await fetch(`${SERVER_URL}/api/alerts`, { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id}) }); fetchBackendAlerts(); } catch(e) {} }
 
-// ==========================================
-// 🤖 AI 日志与资金曲线
-// ==========================================
 let roiChartInstance = null;
 function renderROIChart(logs) {
     const ctx = document.getElementById('roiChart').getContext('2d');
@@ -465,9 +469,51 @@ async function fetchCorrelation() {
     } catch(e) { document.getElementById('corrValue').textContent = "--"; } 
 }
 
-async function fetchFearGreed() { try { var res = await fetch("https://api.alternative.me/fng/?limit=1"); var data = await res.json(); var val = +data.data[0].value, txt = data.data[0].value_classification; var el = document.getElementById('fgValue'); el.textContent = val; el.style.color = val<25?'#ff1744':val<45?'#ff9800':val<55?'#ffeb3b':val<75?'#8bc34a':'#00e676'; document.getElementById('fgText').textContent = txt; document.getElementById('fgNeedle').style.left = val+'%'; document.getElementById('fgAdvice').textContent = val<20?"极度恐慌通常是买入机会":val>80?"极度贪婪需警惕":"情绪正常"; } catch(e) {} }
+// 🔥 修复：加入双重代理穿透解决 CORS 墙的问题
+async function fetchFearGreed() { 
+    const updateFG = (val, txt) => {
+        const el = document.getElementById('fgValue'); el.textContent = val;
+        el.style.color = val<25?'#ff1744':val<45?'#ff9800':val<55?'#ffeb3b':val<75?'#8bc34a':'#00e676';
+        document.getElementById('fgText').textContent = txt;
+        document.getElementById('fgNeedle').style.left = val+'%';
+        document.getElementById('fgAdvice').textContent = val<20?"极度恐慌通常是买入机会":val>80?"极度贪婪需警惕":"情绪正常";
+    };
+    try { 
+        let res = await fetch("https://api.alternative.me/fng/?limit=1"); 
+        let data = await res.json(); 
+        updateFG(+data.data[0].value, data.data[0].value_classification);
+    } catch(e) {
+        // 如果直连失败，自动切换备用代理通道
+        try {
+            let resProxy = await fetch("https://api.allorigins.win/get?url=" + encodeURIComponent("https://api.alternative.me/fng/?limit=1"));
+            let dataProxy = await resProxy.json();
+            let parsed = JSON.parse(dataProxy.contents);
+            updateFG(+parsed.data[0].value, parsed.data[0].value_classification);
+        } catch(err) {
+            document.getElementById('fgText').textContent = "数据源被墙";
+        }
+    } 
+}
 
-// 🔥 对接后端 AI 资讯接口
+// 🔥 找回未来的宏观事件预告
+function loadEvents() {
+    const events = [
+        {date:'本周四 凌晨 02:00', title:'美联储 FOMC 利率决议', impact:'high', desc:'决定全球美元流动性，将引发剧烈波动'},
+        {date:'本周五 晚间 20:30', title:'美国非农就业数据 (NFP)', impact:'high', desc:'判断美国经济衰退风险的核心指标'},
+        {date:'下周二 晚间 20:30', title:'美国 CPI 通胀数据', impact:'medium', desc:'直接影响后续降息预期的重要数据'}
+    ];
+    document.getElementById('eventList').innerHTML = events.map(e => `
+    <div class="event-item">
+        <div class="event-time-block"><div class="event-date">${e.date}</div></div>
+        <div style="flex:1;">
+            <div class="event-title">${e.title}</div>
+            <div class="event-desc">${e.desc}</div>
+            <span class="tag ${e.impact==='high'?'bear':'neutral'}" style="margin-top:6px;display:inline-block;">${e.impact==='high'?'🔴 高危剧烈波动':'🟡 中度影响'}</span>
+        </div>
+    </div>`).join('');
+}
+
+// 🔥 对接后端的 AI 新闻翻译与情绪接口
 async function loadAINews() { 
     try {
         const res = await fetch(`${SERVER_URL}/api/news`);
@@ -533,8 +579,14 @@ window.addEventListener('DOMContentLoaded', () => {
         else { document.getElementById('tvchart').innerHTML = "<div style='color:#ff1744; text-align:center; padding-top:150px; font-family:Orbitron;'>图表引擎加载失败</div>"; }
     } catch(e) {}
 
-    fetchTicker(); fetchFearGreed(); fetchDominance(); fetchCorrelation(); 
-    generateWhales(); fetchBackendAlerts(); loadAINews(); // 初次加载触发一次
+    fetchTicker(); 
+    fetchFearGreed(); 
+    fetchDominance(); 
+    fetchCorrelation(); 
+    generateWhales(); 
+    fetchBackendAlerts(); 
+    loadEvents(); // 🔥 加载未来预告
+    loadAINews(); // 🔥 加载AI新闻
 
     setInterval(() => { if (typeof LightweightCharts !== 'undefined' && candleSeries) { fetchAndRenderChart(currentInterval); } }, 5000); 
     setInterval(fetchTicker, 2000); 
