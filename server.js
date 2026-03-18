@@ -5,13 +5,13 @@ const EMAILJS_SERVICE_ID = "service_op2rg49";
 const EMAILJS_TEMPLATE_ID = "template_eftwoy6"; 
 const EMAILJS_PUBLIC_KEY = "tIZB9DwwpEKr3KQpQ"; 
 const NOTIFY_EMAIL = "2183089849@qq.com";
+// 如果没有配置，就不起作用
 const KV_REST_API_URL = "https://exact-sparrow-75815.upstash.io"; 
 
 const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
 const TIMEFRAMES = ["5m", "15m", "1h", "4h"]; 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; 
 
-// 🔥 切回 DeepSeek 的 API KEY
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY; 
 const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY;
 const KV_REST_API_TOKEN = process.env.KV_REST_API_TOKEN;
@@ -23,18 +23,16 @@ let lastPrices = { BTCUSDT: null, ETHUSDT: null, SOLUSDT: null };
 let cachedNews = []; 
 let isMonitoringActive = true; 
 
-console.log("🚀 量化 AI (DeepSeek 批处理融合版) 已上线...");
+// 🔥 核心修复：真正的单机内存模式，解决报警存不上的问题！
+let inMemoryDB = { trade_logs: [], price_alerts: [] };
+
+console.log("🚀 量化 AI (DeepSeek 纯血融合版) 已上线...");
 
 function postJSON(url, body, extraHeaders) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);
     const urlObj = new URL(url);
-    const options = { 
-      hostname: urlObj.hostname, 
-      path: urlObj.pathname + urlObj.search, 
-      method: 'POST', 
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), ...(extraHeaders||{}) } 
-    };
+    const options = { hostname: urlObj.hostname, path: urlObj.pathname + urlObj.search, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), ...(extraHeaders||{}) } };
     const req = https.request(options, (res) => {
       let d = ''; res.on('data', c => d += c);
       res.on('end', () => { if (res.statusCode !== 200) reject(new Error(`HTTP ${res.statusCode}: ${d}`)); else { try { resolve(JSON.parse(d)); } catch(e) { resolve(d); } } });
@@ -45,7 +43,7 @@ function postJSON(url, body, extraHeaders) {
 
 function fetchJSON(url, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'Crypto-Monitor/14.0', ...extraHeaders } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': 'Crypto-Monitor/14.1', ...extraHeaders } }, (res) => {
       let data = ''; res.on('data', chunk => data += chunk);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } });
     }).on('error', reject);
@@ -57,17 +55,26 @@ async function sendSignalEmail(action, messageHtml, price, titleStr, symbol) {
   const time = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
   try { await postJSON("https://api.emailjs.com/api/v1.0/email/send", { service_id: EMAILJS_SERVICE_ID, template_id: EMAILJS_TEMPLATE_ID, user_id: EMAILJS_PUBLIC_KEY, accessToken: EMAILJS_PRIVATE_KEY, template_params: { to_email: NOTIFY_EMAIL, symbol: symbol, interval: titleStr, signal: action, price: price.toString(), message: messageHtml, time: time }}); } catch (e) {}
 }
-async function loadData(key) { if (!KV_REST_API_URL||!KV_REST_API_TOKEN) return []; try { const res = await fetchJSON(`${KV_REST_API_URL}/get/${key}`, { Authorization: `Bearer ${KV_REST_API_TOKEN}` }); if (res.result) return typeof res.result === 'string' ? JSON.parse(res.result) : res.result; } catch(e) {} return []; }
-async function saveData(key, data) { if (KV_REST_API_URL&&KV_REST_API_TOKEN) try { await postJSON(`${KV_REST_API_URL}/set/${key}`, data, { Authorization: `Bearer ${KV_REST_API_TOKEN}` }); }catch(e){} }
+
+// 🔥 修复：如果没有配置数据库秘钥，自动使用内存存取
+async function loadData(key) { 
+    if (!KV_REST_API_URL || !KV_REST_API_TOKEN) return inMemoryDB[key] || []; 
+    try { const res = await fetchJSON(`${KV_REST_API_URL}/get/${key}`, { Authorization: `Bearer ${KV_REST_API_TOKEN}` }); if (res.result) return typeof res.result === 'string' ? JSON.parse(res.result) : res.result; } catch(e) {} 
+    return []; 
+}
+async function saveData(key, data) { 
+    if (!KV_REST_API_URL || !KV_REST_API_TOKEN) { inMemoryDB[key] = data; return; } 
+    try { await postJSON(`${KV_REST_API_URL}/set/${key}`, data, { Authorization: `Bearer ${KV_REST_API_TOKEN}` }); }catch(e){} 
+}
+
 async function addTradeLog(symbol, timeframe, action, style, entryPrice) { const logs = await loadData('trade_logs'); logs.push({ id: Date.now().toString(), symbol: symbol, timeframe: timeframe, entryTime: new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }), entryTimestamp: Date.now(), action: action, style: style, entryPrice: entryPrice, exitPrice: null, exitTime: null, holdTime: null, roi: null, status: 'OPEN' }); await saveData('trade_logs', logs); }
 
 function calcMA(data, period) { if (data.length < period) return 0; return data.slice(-period).reduce((sum, c) => sum + c.close, 0) / period; }
 function calcRSI(data, period = 14) { if (data.length < period + 1) return 50; let gains = 0, losses = 0; for (let i = data.length - period; i < data.length; i++) { const diff = data[i].close - data[i-1].close; if (diff > 0) gains += diff; else losses -= diff; } const avgLoss = losses / period; if (avgLoss === 0) return 100; return 100 - (100 / (1 + (gains / period) / avgLoss)); }
 function calcATR(data, period = 14) { if (data.length < period + 1) return 0; let sumTR = 0; for (let i = data.length - period; i < data.length; i++) { const high = data[i].high, low = data[i].low, prevClose = data[i-1].close; sumTR += Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)); } return sumTR / period; }
 
-// 🔥 新闻分析切回 DeepSeek 引擎
 async function fetchAndAnalyzeNews() {
-    if (!DEEPSEEK_API_KEY) { console.error("❌ 未找到 DEEPSEEK_API_KEY"); return; }
+    if (!DEEPSEEK_API_KEY) return;
     try {
         const res = await fetchJSON('https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Fcointelegraph.com%2Frss');
         if (!res || !res.items) return;
@@ -83,10 +90,9 @@ async function fetchAndAnalyzeNews() {
         let jsonStr = aiRes.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```json/gi, '').replace(/```/g, '').trim();
         cachedNews = JSON.parse(jsonStr).map((item, i) => ({ ...item, link: topNews[i].link }));
         console.log("📰 DeepSeek 新闻翻译完成！");
-    } catch(e) { console.error("新闻分析失败:", e.message); }
+    } catch(e) {}
 }
 
-// 🔥 批量交易决策切回 DeepSeek 引擎
 async function askAIBatchDecisions(batchData) {
   if (!DEEPSEEK_API_KEY || batchData.length === 0) return [];
   const prompt = `你是顶级量化模型。请一次性分析以下 ${batchData.length} 组加密货币数据。
@@ -101,7 +107,7 @@ async function askAIBatchDecisions(batchData) {
     
     let jsonStr = res.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```json/gi, '').replace(/```/g, '').trim();
     return JSON.parse(jsonStr);
-  } catch (e) { console.error("批量分析失败:", e.message); return []; }
+  } catch (e) { return []; }
 }
 
 async function runMonitor() {
@@ -146,7 +152,7 @@ async function runMonitor() {
           if (targetDir === 'WAIT') {
               if (positions[posKey] !== null) { signalTitle = `【平仓警报】`; positions[posKey] = null; } else continue;
           } else {
-              if (isAggressive && winRate < 60) continue; // 依然保留60%容易出单的门槛
+              if (isAggressive && winRate < 60) continue; 
               if (positions[posKey] === null) signalTitle = `【DeepSeek 指令】${styleStr}${actionStr}`; 
               else signalTitle = `【DeepSeek 反手】${styleStr}${actionStr}`;
               positions[posKey] = targetDir; 
@@ -174,10 +180,6 @@ http.createServer(async (req, res) => {
   if (req.url === '/api/toggle-monitor' && req.method === 'POST') { isMonitoringActive = !isMonitoringActive; res.writeHead(200); res.end(JSON.stringify({ success: true, isMonitoringActive })); return; }
   if (req.url === '/api/news' && req.method === 'GET') { res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(cachedNews)); return; }
 
-  if (req.url === '/api/test-signal') {
-      sendWeChatPush("【DeepSeek 测试】", "API 秘钥部署完成！系统全通！");
-      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'}); res.end("<h2 style='color:green;text-align:center'>✅ DeepSeek 验证成功！系统全通！</h2>"); return;
-  }
   if (req.url === '/api/close' && req.method === 'POST') {
       let body = ''; req.on('data', c => body += c.toString());
       req.on('end', async () => {
