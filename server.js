@@ -1,9 +1,6 @@
 const https = require('https');
 const http = require('http');
 
-// ==========================================
-// 🔐 终极配置 (Gemini 压缩打包版 + 休眠开关 + 60%胜率)
-// ==========================================
 const EMAILJS_SERVICE_ID = "service_op2rg49"; 
 const EMAILJS_TEMPLATE_ID = "template_eftwoy6"; 
 const EMAILJS_PUBLIC_KEY = "tIZB9DwwpEKr3KQpQ"; 
@@ -25,12 +22,10 @@ SYMBOLS.forEach(sym => TIMEFRAMES.forEach(tf => positions[`${sym}_${tf}`] = null
 
 let lastPrices = { BTCUSDT: null, ETHUSDT: null, SOLUSDT: null };
 let cachedNews = []; 
-// 🔥 全局睡眠开关：默认开启监控
 let isMonitoringActive = true; 
 
-console.log("🚀 量化 AI (Gemini 打包引擎 + 睡眠开关) 已上线...");
+console.log("🚀 量化 AI (Gemini 1.5 稳定引擎) 已上线...");
 
-// --- 网络请求核心 ---
 function postJSON(url, body, extraHeaders) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);
@@ -53,7 +48,6 @@ function fetchJSON(url, extraHeaders = {}) {
   });
 }
 
-// --- 推送与存取 ---
 async function sendWeChatPush(title, desp) { if(SERVERCHAN_SENDKEY) try { await postJSON(`https://sctapi.ftqq.com/${SERVERCHAN_SENDKEY}.send`, { title, desp }); }catch(e){} }
 async function sendSignalEmail(action, messageHtml, price, titleStr, symbol) {
   const time = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
@@ -63,13 +57,12 @@ async function loadData(key) { if (!KV_REST_API_URL||!KV_REST_API_TOKEN) return 
 async function saveData(key, data) { if (KV_REST_API_URL&&KV_REST_API_TOKEN) try { await postJSON(`${KV_REST_API_URL}/set/${key}`, data, { Authorization: `Bearer ${KV_REST_API_TOKEN}` }); }catch(e){} }
 async function addTradeLog(symbol, timeframe, action, style, entryPrice) { const logs = await loadData('trade_logs'); logs.push({ id: Date.now().toString(), symbol: symbol, timeframe: timeframe, entryTime: new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }), entryTimestamp: Date.now(), action: action, style: style, entryPrice: entryPrice, exitPrice: null, exitTime: null, holdTime: null, roi: null, status: 'OPEN' }); await saveData('trade_logs', logs); }
 
-// --- 指标计算 ---
 function calcMA(data, period) { if (data.length < period) return 0; return data.slice(-period).reduce((sum, c) => sum + c.close, 0) / period; }
 function calcRSI(data, period = 14) { if (data.length < period + 1) return 50; let gains = 0, losses = 0; for (let i = data.length - period; i < data.length; i++) { const diff = data[i].close - data[i-1].close; if (diff > 0) gains += diff; else losses -= diff; } const avgLoss = losses / period; if (avgLoss === 0) return 100; return 100 - (100 / (1 + (gains / period) / avgLoss)); }
 function calcATR(data, period = 14) { if (data.length < period + 1) return 0; let sumTR = 0; for (let i = data.length - period; i < data.length; i++) { const high = data[i].high, low = data[i].low, prevClose = data[i-1].close; sumTR += Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)); } return sumTR / period; }
 
 async function fetchAndAnalyzeNews() {
-    if (!GEMINI_API_KEY) return;
+    if (!GEMINI_API_KEY) { console.error("❌ 未找到 GEMINI_API_KEY，跳过新闻分析"); return; }
     try {
         const res = await fetchJSON('https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Fcointelegraph.com%2Frss');
         if (!res || !res.items) return;
@@ -80,15 +73,18 @@ async function fetchAndAnalyzeNews() {
 1. date：提取发布时间转为北京时间(MM-DD HH:mm)。2. sentiment：如"利好 75%"，不确定写"中性"。3. type："bull", "bear", "neutral"。
 英文新闻：\n${topNews.map(n => n.pubDate + ' | ' + n.title).join('\n')}`;
 
-        const aiRes = await postJSON(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+        // 🔥 修正为最稳定的 gemini-1.5-flash 模型
+        const aiRes = await postJSON(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
             contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3 }
         });
+        
+        if (!aiRes.candidates) throw new Error(JSON.stringify(aiRes));
         let jsonStr = aiRes.candidates[0].content.parts[0].text.replace(/```json/gi, '').replace(/```/g, '').trim();
         cachedNews = JSON.parse(jsonStr).map((item, i) => ({ ...item, link: topNews[i].link }));
+        console.log("📰 Gemini 新闻翻译完成！");
     } catch(e) { console.error("新闻拉取失败:", e.message); }
 }
 
-// --- 🧠 Gemini 超级打包引擎 (极大幅度节省 API 额度) ---
 async function askAIBatchDecisions(batchData) {
   if (!GEMINI_API_KEY || batchData.length === 0) return [];
   const prompt = `你是顶级量化模型。请一次性分析以下 ${batchData.length} 组加密货币的跨周期数据，并做出独立判断。
@@ -106,25 +102,19 @@ ${JSON.stringify(batchData)}
 ]`;
 
   try {
-    const res = await postJSON(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+    // 🔥 修正为最稳定的 gemini-1.5-flash 模型
+    const res = await postJSON(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
         contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.2 }
     });
+    if (!res.candidates) throw new Error(JSON.stringify(res));
     let jsonStr = res.candidates[0].content.parts[0].text.replace(/```json/gi, '').replace(/```/g, '').trim();
     return JSON.parse(jsonStr);
   } catch (e) { console.error("批量分析失败:", e.message); return []; }
 }
 
-// --- 监控主循环 (加入睡眠开关与批处理) ---
 async function runMonitor() {
-  // 🔥 睡眠模式检测：如果关闭了监控，直接退出，不消耗任何资源
-  if (!isMonitoringActive) {
-      console.log("💤 睡眠模式已开启，跳过本次监控扫描。");
-      return; 
-  }
-
+  if (!isMonitoringActive) { return; }
   let batchData = [];
-
-  // 1. 收集所有数据打包
   for (const symbol of SYMBOLS) {
       for (const timeframe of TIMEFRAMES) {
           try {
@@ -150,11 +140,8 @@ async function runMonitor() {
       }
   }
 
-  // 2. 一次性将 12 组数据发送给 Gemini (节省11次 API 请求)
   if (batchData.length > 0) {
       const aiResults = await askAIBatchDecisions(batchData);
-      
-      // 3. 拆解并处理 AI 的批量指令
       for (const aiObj of aiResults) {
           if (!aiObj || !aiObj.symbol) continue;
           const posKey = `${aiObj.symbol}_${aiObj.timeframe}`;
@@ -169,9 +156,7 @@ async function runMonitor() {
           if (targetDir === 'WAIT') {
               if (positions[posKey] !== null) { signalTitle = `【平仓警报】`; positions[posKey] = null; } else continue;
           } else {
-              // 🔥 风控门槛降低：及格线正式下调为 60%
               if (isAggressive && winRate < 60) continue; 
-              
               if (positions[posKey] === null) signalTitle = `【Gemini 指令】${styleStr}${actionStr}`; 
               else signalTitle = `【Gemini 反手】${styleStr}${actionStr}`;
               positions[posKey] = targetDir; 
@@ -192,26 +177,16 @@ async function runMonitor() {
   }
 }
 
-// --- Web API ---
 http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, DELETE'); res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
-  
-  // 🟢 状态接口：供前端判断系统是否在休眠
   if (req.url === '/status') { res.writeHead(200); res.end(JSON.stringify({ status: "alive", isMonitoringActive })); return; }
-  
-  // 🟢 睡眠开关接口：一键开关大盘扫描
-  if (req.url === '/api/toggle-monitor' && req.method === 'POST') {
-      isMonitoringActive = !isMonitoringActive;
-      res.writeHead(200); res.end(JSON.stringify({ success: true, isMonitoringActive }));
-      return;
-  }
-
+  if (req.url === '/api/toggle-monitor' && req.method === 'POST') { isMonitoringActive = !isMonitoringActive; res.writeHead(200); res.end(JSON.stringify({ success: true, isMonitoringActive })); return; }
   if (req.url === '/api/news' && req.method === 'GET') { res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(cachedNews)); return; }
 
   if (req.url === '/api/test-signal') {
-      sendWeChatPush("【Gemini 测试】", "测试正常\n通信畅通，随时准备收割大盘！");
-      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'}); res.end("<h2 style='color:green;text-align:center'>✅ Gemini 发射成功！</h2>"); return;
+      sendWeChatPush("【Gemini 测试】", "API 秘钥生效！通信正常！");
+      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'}); res.end("<h2 style='color:green;text-align:center'>✅ API Key 验证成功！</h2>"); return;
   }
   if (req.url === '/api/close' && req.method === 'POST') {
       let body = ''; req.on('data', c => body += c.toString());
