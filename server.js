@@ -1,21 +1,16 @@
 const https = require('https');
 const http = require('http');
 
-// ==========================================
-// 🔐 核心配置
-// ==========================================
 const EMAILJS_SERVICE_ID = "service_op2rg49"; 
 const EMAILJS_TEMPLATE_ID = "template_eftwoy6"; 
 const EMAILJS_PUBLIC_KEY = "tIZB9DwwpEKr3KQpQ"; 
 const NOTIFY_EMAIL = "2183089849@qq.com";
 const KV_REST_API_URL = "https://exact-sparrow-75815.upstash.io"; 
 
-// 🔥 核心修改：只保留 ETHUSDT，屏蔽其他所有币种的扫描和报警
-const SYMBOLS = ["ETHUSDT"];
-const TIMEFRAME = "15m"; // 主力作战周期
-const TREND_TIMEFRAME = "4h"; // 大局观周期
+const SYMBOLS = ["ETHUSDT"]; // 专注 ETH
+const TIMEFRAME = "15m"; 
+const TREND_TIMEFRAME = "4h"; 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; 
-const ALERT_CHECK_INTERVAL = 10 * 1000; 
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY; 
 const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY;
@@ -24,17 +19,15 @@ const SERVERCHAN_SENDKEY = process.env.SERVERCHAN_SENDKEY;
 
 let positions = {}; 
 let entryPrices = {}; 
-SYMBOLS.forEach(sym => { positions[sym] = null; entryPrices[sym] = null; });
+let entryTimes = {}; // 🔥 新增：记录入场时间，防止频繁平仓
+SYMBOLS.forEach(sym => { positions[sym] = null; entryPrices[sym] = null; entryTimes[sym] = 0; });
 let lastPrices = { ETHUSDT: null };
 let cachedNews = []; 
 let isMonitoringActive = true; 
 let inMemoryDB = { trade_logs: [], price_alerts: [] };
 
-console.log("👑 量化 AI (ETH 专属·神级三维防御版) 已上线...");
+console.log("👑 修复版量化 AI (带持仓时间保护 + 强化做空) 已上线...");
 
-// ==========================================
-// 📦 工具函数
-// ==========================================
 function postJSON(url, body, extraHeaders) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);
@@ -50,7 +43,7 @@ function postJSON(url, body, extraHeaders) {
 
 function fetchJSON(url, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'God-Mode-Bot/1.1', ...extraHeaders } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': 'God-Mode-Bot/2.0', ...extraHeaders } }, (res) => {
       let data = ''; res.on('data', chunk => data += chunk);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } });
     }).on('error', reject);
@@ -70,9 +63,7 @@ async function loadData(key) {
 }
 async function saveData(key, data) { 
     inMemoryDB[key] = data;
-    if (KV_REST_API_URL && KV_REST_API_TOKEN) {
-        try { await postJSON(`${KV_REST_API_URL}/set/${key}`, data, { Authorization: `Bearer ${KV_REST_API_TOKEN}` }); }catch(e){} 
-    }
+    if (KV_REST_API_URL && KV_REST_API_TOKEN) { try { await postJSON(`${KV_REST_API_URL}/set/${key}`, data, { Authorization: `Bearer ${KV_REST_API_TOKEN}` }); }catch(e){} }
 }
 async function addTradeLog(symbol, action, style, entryPrice) { 
     const logs = await loadData('trade_logs'); 
@@ -80,12 +71,8 @@ async function addTradeLog(symbol, action, style, entryPrice) {
     await saveData('trade_logs', logs.slice(-50)); 
 }
 
-// ==========================================
-// 📊 神级数学指标库
-// ==========================================
 function calcMA(data, period) { if (data.length < period) return 0; return data.slice(-period).reduce((sum, c) => sum + c.close, 0) / period; }
 function calcRSI(data, period = 14) { if (data.length < period + 1) return 50; let gains = 0, losses = 0; for (let i = data.length - period; i < data.length; i++) { const diff = data[i].close - data[i-1].close; if (diff > 0) gains += diff; else losses -= diff; } const avgLoss = losses / period; if (avgLoss === 0) return 100; return 100 - (100 / (1 + (gains / period) / avgLoss)); }
-function calcATR(data, period = 14) { if (data.length < period + 1) return 0; let sumTR = 0; for (let i = data.length - period; i < data.length; i++) { const high = data[i].high, low = data[i].low, prevClose = data[i-1].close; sumTR += Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)); } return sumTR / period; }
 function calcEMA(data, period) {
     if (data.length < period) return data[data.length-1].close;
     let sum = 0; for(let i=0; i<period; i++) sum += data[i].close;
@@ -96,34 +83,27 @@ function calcEMA(data, period) {
 }
 
 // ==========================================
-// 🧠 AI 决策层
+// 🧠 修复：强化做空与 HOLD 机制的 AI Prompt
 // ==========================================
-async function fetchAndAnalyzeNews() {
-    if (!DEEPSEEK_API_KEY) return;
-    try {
-        const res = await fetchJSON('https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Fcointelegraph.com%2Frss');
-        if (!res || !res.items) return;
-        const topNews = res.items.slice(0, 5);
-        const prompt = `分析加密新闻利好利空。严格返回 JSON 数组格式，不要有思考过程：[{"date":"MM-DD HH:mm", "title":"中文标题", "sentiment":"利好 80%", "type":"bull"}]新闻：\n${topNews.map(n => n.title).join('\n')}`;
-        const aiRes = await postJSON("https://api.deepseek.com/chat/completions", { model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.3 }, { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` });
-        let jsonStr = aiRes.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```json/gi, '').replace(/```/g, '').trim();
-        cachedNews = JSON.parse(jsonStr).map((item, i) => ({ ...item, link: topNews[i].link }));
-    } catch(e) { cachedNews = [{date: "系统", title: "新闻引擎维护中...", sentiment: "中性", type: "neutral", link: "#"}]; }
-}
-
 async function askAIBatchDecisions(batchData) {
   if (!DEEPSEEK_API_KEY || batchData.length === 0) return [];
-  const prompt = `你是华尔街量化之神。根据数据给出决策。严格返回 JSON 数组：[{"symbol": "ETHUSDT", "direction": "LONG/SHORT/WAIT", "style": "STEADY", "win_rate": 85, "sl": 0, "tp1": 0, "reason": "理由"}]\n数据：${JSON.stringify(batchData)}`;
+  // 🔥 核心重写：强制 AI 认识到做空和持有的选项，取代过去的 WAIT
+  const prompt = `你是量化机器人。根据以下数据做出交易决策。
+【重要指令】：
+1. 如果均线呈空头排列 (如现价低于MA5和MA20)，必须果断输出 SHORT (做空)，不要幻想抄底！
+2. 如果当前有持仓且趋势未坏，输出 HOLD (持有)。
+3. 只有当趋势反转需要止盈/止损时，才输出 CLOSE (平仓)。
+4. 没有持仓且不符合开仓条件时，输出 WAIT。
+严格返回 JSON 数组：[{"symbol": "ETHUSDT", "direction": "LONG/SHORT/HOLD/CLOSE/WAIT", "win_rate": 85, "reason": "理由"}]
+数据：${JSON.stringify(batchData)}`;
+  
   try {
-    const res = await postJSON("https://api.deepseek.com/chat/completions", { model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.2 }, { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` });
+    const res = await postJSON("https://api.deepseek.com/chat/completions", { model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.1 }, { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` });
     let jsonStr = res.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```json/gi, '').replace(/```/g, '').trim();
     return JSON.parse(jsonStr);
   } catch (e) { return []; }
 }
 
-// ==========================================
-// 🛡️ 核心防御与运行引擎
-// ==========================================
 async function runMonitor() {
   if (!isMonitoringActive) return;
   let batchData = [];
@@ -131,35 +111,32 @@ async function runMonitor() {
   for (const symbol of SYMBOLS) {
       try {
         const data4h = await fetchJSON(`https://api.binance.us/api/v3/klines?symbol=${symbol}&interval=${TREND_TIMEFRAME}&limit=250`);
-        const candles4h = data4h.map(d => ({ close: +d[4] }));
-        const ema200_4h = calcEMA(candles4h, 200);
+        const ema200_4h = calcEMA(data4h.map(d => ({ close: +d[4] })), 200);
         
         const data15m = await fetchJSON(`https://api.binance.us/api/v3/klines?symbol=${symbol}&interval=${TIMEFRAME}&limit=50`);
         const candles15m = data15m.map(d => ({ open: +d[1], high: +d[2], low: +d[3], close: +d[4] }));
         const currentPrice = candles15m[candles15m.length - 1].close;
         lastPrices[symbol] = currentPrice;
         
-        const ma5 = calcMA(candles15m, 5), ma10 = calcMA(candles15m, 10);
-        const rsi = calcRSI(candles15m, 14);
+        const ma5 = calcMA(candles15m, 5), ma20 = calcMA(candles15m, 20), rsi = calcRSI(candles15m, 14);
         
-        const lastCandle = candles15m[candles15m.length - 1];
-        const dropPercent = ((lastCandle.open - lastCandle.close) / lastCandle.open) * 100;
-        const isWaterfall = dropPercent > 1.5;
-
         const isBearTrend = currentPrice < ema200_4h;
 
-        if (positions[symbol] === 'LONG' && entryPrices[symbol]) {
-            const lossPercent = ((entryPrices[symbol] - currentPrice) / entryPrices[symbol]) * 100;
-            if (lossPercent >= 5.0 || isWaterfall) {
-                await sendSignalEmail("🩸 强制熔断平仓", `亏损触及 5% 底线或遭遇极端瀑布，系统已强制越权平仓！`, currentPrice, TIMEFRAME, symbol);
-                await sendWeChatPush(`🚨 ${symbol} 强制平仓`, `当前跌幅过大，已触发底层保本协议。`);
-                positions[symbol] = null;
-                entryPrices[symbol] = null;
+        // 🛑 硬止损保护保留
+        if (positions[symbol] && entryPrices[symbol]) {
+            const lossPercent = positions[symbol] === 'LONG' 
+                ? ((entryPrices[symbol] - currentPrice) / entryPrices[symbol]) * 100
+                : ((currentPrice - entryPrices[symbol]) / entryPrices[symbol]) * 100;
+
+            if (lossPercent >= 5.0) {
+                await sendSignalEmail("🩸 强制熔断平仓", `亏损触及 5% 底线，系统已强制越权平仓！`, currentPrice, TIMEFRAME, symbol);
+                await sendWeChatPush(`🚨 ${symbol} 强制平仓`, `当前浮亏过大，触发保本协议。`);
+                positions[symbol] = null; entryPrices[symbol] = null; entryTimes[symbol] = 0;
                 continue; 
             }
         }
 
-        batchData.push({ symbol, currentPrice, ma5, ma10, rsi, ema200_4h, isWaterfall, isBearTrend, currentPos: positions[symbol] });
+        batchData.push({ symbol, currentPrice, ma5, ma20, rsi, isBearTrend, currentPos: positions[symbol] || 'NONE' });
       } catch (e) {}
   }
 
@@ -173,89 +150,55 @@ async function runMonitor() {
           let dir = res.direction.toUpperCase();
           const targetData = batchData.find(b => b.symbol === sym);
 
-          if (dir === 'LONG') {
-              if (targetData.isWaterfall) {
-                  console.log(`❌ VETO: 拒绝在瀑布中做多 ${sym}`);
-                  dir = 'WAIT';
-                  res.reason = "【底层拦截】遭遇极端瀑布砸盘，禁止接飞刀！";
-              } else if (targetData.isBearTrend) {
-                  console.log(`❌ VETO: 拒绝在 4H 熊市做多 ${sym}`);
-                  dir = 'WAIT';
-                  res.reason = "【底层拦截】大级别处于熊市区间，禁止逆势开多！";
-              }
+          // ⚖️ VETO 系统：拒绝逆势操作
+          if (dir === 'LONG' && targetData.isBearTrend) {
+              dir = 'WAIT'; res.reason = "【拦截】4H熊市，禁止做多";
+          } else if (dir === 'SHORT' && !targetData.isBearTrend) {
+              dir = 'WAIT'; res.reason = "【拦截】4H牛市，禁止做空";
           }
 
-          if (dir === positions[sym]) continue;
-          
-          if (dir === 'WAIT') {
+          // 🔥 核心修复：HOLD 状态处理 和 持仓时间保护
+          if (dir === 'HOLD' || dir === positions[sym]) continue; // 保持现状，直接跳过
+
+          // 只有当 AI 明确发出 CLOSE，或者给出反向交易信号时，才考虑平仓
+          if (dir === 'CLOSE' || dir === 'WAIT' || (positions[sym] && dir !== positions[sym])) {
               if (positions[sym]) {
+                  // ⏳ 时间保护伞：开仓不足 30 分钟，系统拒绝 AI 的平仓请求（除非打到上面 5% 硬止损）
+                  const holdTimeMins = (Date.now() - entryTimes[sym]) / (1000 * 60);
+                  if (holdTimeMins < 30) {
+                      console.log(`⏳ 时间保护生效：${sym} 开仓仅 ${holdTimeMins.toFixed(1)} 分钟，拒绝提早平仓。`);
+                      continue; 
+                  }
+
                   await sendSignalEmail("🏳️ 平仓收网", res.reason, lastPrices[sym], TIMEFRAME, sym);
-                  await sendWeChatPush(`平仓提醒: ${sym}`, `理由: ${res.reason}`);
-                  positions[sym] = null;
-                  entryPrices[sym] = null;
+                  await sendWeChatPush(`平仓: ${sym}`, `持仓时间: ${holdTimeMins.toFixed(0)}分钟\n理由: ${res.reason}`);
+                  positions[sym] = null; entryPrices[sym] = null; entryTimes[sym] = 0;
               }
-          } else if (parseInt(res.win_rate || 0) >= 60) {
+          } 
+          
+          // 新开仓逻辑
+          if ((dir === 'LONG' || dir === 'SHORT') && !positions[sym] && parseInt(res.win_rate || 0) >= 60) {
               positions[sym] = dir;
               entryPrices[sym] = lastPrices[sym]; 
-              await sendSignalEmail(`🎯 神级开仓: ${dir}`, res.reason, lastPrices[sym], TIMEFRAME, sym);
+              entryTimes[sym] = Date.now(); // 记录入场时间点
+              await sendSignalEmail(`🎯 开仓: ${dir}`, res.reason, lastPrices[sym], TIMEFRAME, sym);
               await sendWeChatPush(`开仓: ${sym} ${dir}`, `胜率: ${res.win_rate}%\n逻辑: ${res.reason}`);
-              await addTradeLog(sym, dir, res.style || 'GOD_MODE', lastPrices[sym]);
+              await addTradeLog(sym, dir, 'STEADY', lastPrices[sym]);
           }
       }
   }
 }
 
-async function runAlertEngine() {
-    try {
-        const alerts = await loadData('price_alerts'); if (!alerts || alerts.length === 0) return;
-        const res = await fetchJSON('https://api.binance.us/api/v3/ticker/price');
-        const priceMap = {}; res.forEach(item => priceMap[item.symbol] = parseFloat(item.price));
-        let triggered = false; const remainingAlerts = [];
-        for (const alert of alerts) {
-            // 云端提醒也只保留对 ETH 的判断，防止错乱
-            if (alert.symbol !== "ETHUSDT") continue;
-            
-            const cur = priceMap[alert.symbol];
-            if (!cur) { remainingAlerts.push(alert); continue; }
-            if ((alert.dir === 'above' && cur >= alert.price) || (alert.dir === 'below' && cur <= alert.price)) {
-                await sendWeChatPush(`🚨 价格云端提醒`, `${alert.symbol} 到达 ${cur}`);
-                triggered = true;
-            } else { remainingAlerts.push(alert); }
-        }
-        if (triggered) await saveData('price_alerts', remainingAlerts);
-    } catch(e) {}
-}
-
 // ==========================================
-// 🌐 API 接口
+// 🌐 API 接口与启动
 // ==========================================
 http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
-
-  if (req.url === '/status') { res.end(JSON.stringify({ status: "alive", mode: "God Mode (ETH Only)", isMonitoringActive })); return; }
-  if (req.url === '/api/news') { res.end(JSON.stringify(cachedNews)); return; }
+  if (req.url === '/status') { res.end(JSON.stringify({ status: "alive", mode: "God Mode V2", isMonitoringActive })); return; }
   if (req.url === '/api/logs') { const logs = await loadData('trade_logs'); res.end(JSON.stringify(logs.reverse())); return; }
   if (req.url === '/api/toggle-monitor' && req.method === 'POST') { isMonitoringActive = !isMonitoringActive; res.end(JSON.stringify({success:true})); return; }
-  
-  if (req.url === '/api/alerts' && req.method === 'GET') { const alerts = await loadData('price_alerts'); res.end(JSON.stringify(alerts)); return; }
-  if (req.url === '/api/alerts' && req.method === 'POST') {
-      let body = ''; req.on('data', c => body += c.toString());
-      req.on('end', async () => { try { const newAlert = JSON.parse(body); const alerts = await loadData('price_alerts'); alerts.push({ id: Date.now().toString(), symbol: newAlert.symbol, price: newAlert.price, dir: newAlert.dir }); await saveData('price_alerts', alerts); res.end(JSON.stringify({success: true})); } catch(e) { res.end(JSON.stringify({success: false})); }}); return;
-  }
-  if (req.url === '/api/alerts' && req.method === 'DELETE') {
-      let body = ''; req.on('data', c => body += c.toString());
-      req.on('end', async () => { try { const { id } = JSON.parse(body); let alerts = await loadData('price_alerts'); alerts = alerts.filter(a => a.id !== id); await saveData('price_alerts', alerts); res.end(JSON.stringify({success: true})); } catch(e) { res.end(JSON.stringify({success: false})); }}); return;
-  }
-  res.end("System Running (ETH Only)");
+  res.end("System Running V2");
 }).listen(process.env.PORT || 3000);
 
-// ==========================================
-// 🚀 循环点火
-// ==========================================
-setInterval(fetchAndAnalyzeNews, 30 * 60 * 1000); 
 setInterval(runMonitor, CHECK_INTERVAL_MS); 
-setInterval(runAlertEngine, ALERT_CHECK_INTERVAL);
-fetchAndAnalyzeNews(); runMonitor();
+runMonitor();
