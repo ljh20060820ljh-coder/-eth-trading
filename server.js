@@ -1,13 +1,16 @@
 const https = require('https');
 const http = require('http');
 
+// ==========================================
+// 🔐 核心配置
+// ==========================================
 const EMAILJS_SERVICE_ID = "service_op2rg49"; 
 const EMAILJS_TEMPLATE_ID = "template_eftwoy6"; 
 const EMAILJS_PUBLIC_KEY = "tIZB9DwwpEKr3KQpQ"; 
 const NOTIFY_EMAIL = "2183089849@qq.com";
 const KV_REST_API_URL = "https://exact-sparrow-75815.upstash.io"; 
 
-const SYMBOLS = ["ETHUSDT"]; // 专注 ETH
+const SYMBOLS = ["ETHUSDT"]; // 专注以太坊
 const TIMEFRAME = "15m"; 
 const TREND_TIMEFRAME = "4h"; 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; 
@@ -17,17 +20,24 @@ const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY;
 const KV_REST_API_TOKEN = process.env.KV_REST_API_TOKEN;
 const SERVERCHAN_SENDKEY = process.env.SERVERCHAN_SENDKEY; 
 
-let positions = {}; 
-let entryPrices = {}; 
-let entryTimes = {}; // 🔥 新增：记录入场时间，防止频繁平仓
-SYMBOLS.forEach(sym => { positions[sym] = null; entryPrices[sym] = null; entryTimes[sym] = 0; });
-let lastPrices = { ETHUSDT: null };
-let cachedNews = []; 
+// 🔥 核心重构：引入机械 OCO 订单状态管理
+let position = {
+    status: 'NONE',   // 'LONG', 'SHORT', 'NONE'
+    entryPrice: null, // 开仓价
+    sl: null,         // 止损价 (Stop Loss)
+    tp: null,         // 止盈价 (Take Profit)
+    entryTime: null   // 开仓时间
+};
+
+let lastPrice = null;
 let isMonitoringActive = true; 
-let inMemoryDB = { trade_logs: [], price_alerts: [] };
+let inMemoryDB = { trade_logs: [] };
 
-console.log("👑 修复版量化 AI (带持仓时间保护 + 强化做空) 已上线...");
+console.log("👑 终极波段猎手 (右侧交易 + 机械 OCO 风控) 已上线...");
 
+// ==========================================
+// 📦 工具函数
+// ==========================================
 function postJSON(url, body, extraHeaders) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);
@@ -35,15 +45,15 @@ function postJSON(url, body, extraHeaders) {
     const options = { hostname: urlObj.hostname, path: urlObj.pathname + urlObj.search, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), ...(extraHeaders||{}) } };
     const req = https.request(options, (res) => {
       let d = ''; res.on('data', c => d += c);
-      res.on('end', () => { if (res.statusCode !== 200) reject(new Error(`HTTP ${res.statusCode}: ${d}`)); else { try { resolve(JSON.parse(d)); } catch(e) { resolve(d); } } });
+      res.on('end', () => { if (res.statusCode !== 200) reject(new Error(`HTTP ${res.statusCode}`)); else { try { resolve(JSON.parse(d)); } catch(e) { resolve(d); } } });
     });
     req.on('error', reject); req.write(data); req.end();
   });
 }
 
-function fetchJSON(url, extraHeaders = {}) {
+function fetchJSON(url) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'God-Mode-Bot/2.0', ...extraHeaders } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': 'God-Mode-Bot/3.0' } }, (res) => {
       let data = ''; res.on('data', chunk => data += chunk);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } });
     }).on('error', reject);
@@ -56,148 +66,132 @@ async function sendSignalEmail(action, messageHtml, price, titleStr, symbol) {
   try { await postJSON("https://api.emailjs.com/api/v1.0/email/send", { service_id: EMAILJS_SERVICE_ID, template_id: EMAILJS_TEMPLATE_ID, user_id: EMAILJS_PUBLIC_KEY, accessToken: EMAILJS_PRIVATE_KEY, template_params: { to_email: NOTIFY_EMAIL, symbol: symbol, interval: titleStr, signal: action, price: price.toString(), message: messageHtml, time: time }}); } catch (e) {}
 }
 
-async function loadData(key) { 
-    if (!KV_REST_API_URL || !KV_REST_API_TOKEN) return inMemoryDB[key] || []; 
-    try { const res = await fetchJSON(`${KV_REST_API_URL}/get/${key}`, { Authorization: `Bearer ${KV_REST_API_TOKEN}` }); if (res.result) return typeof res.result === 'string' ? JSON.parse(res.result) : res.result; } catch(e) {} 
-    return inMemoryDB[key] || []; 
-}
-async function saveData(key, data) { 
-    inMemoryDB[key] = data;
-    if (KV_REST_API_URL && KV_REST_API_TOKEN) { try { await postJSON(`${KV_REST_API_URL}/set/${key}`, data, { Authorization: `Bearer ${KV_REST_API_TOKEN}` }); }catch(e){} }
-}
-async function addTradeLog(symbol, action, style, entryPrice) { 
-    const logs = await loadData('trade_logs'); 
-    logs.push({ id: Date.now().toString(), symbol, timeframe: TIMEFRAME, entryTime: new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }), action, style, entryPrice, status: 'OPEN' });
-    await saveData('trade_logs', logs.slice(-50)); 
-}
+// 数据库操作
+async function loadData(key) { if (!KV_REST_API_URL || !KV_REST_API_TOKEN) return inMemoryDB[key] || []; try { const res = await fetchJSON(`${KV_REST_API_URL}/get/${key}`, { Authorization: `Bearer ${KV_REST_API_TOKEN}` }); if (res.result) return typeof res.result === 'string' ? JSON.parse(res.result) : res.result; } catch(e) {} return inMemoryDB[key] || []; }
+async function saveData(key, data) { inMemoryDB[key] = data; if (KV_REST_API_URL && KV_REST_API_TOKEN) { try { await postJSON(`${KV_REST_API_URL}/set/${key}`, data, { Authorization: `Bearer ${KV_REST_API_TOKEN}` }); }catch(e){} } }
+async function addTradeLog(action, entryPrice, sl, tp, reason) { const logs = await loadData('trade_logs'); logs.push({ id: Date.now().toString(), symbol: "ETHUSDT", action, entryPrice, sl, tp, reason, time: new Date().toLocaleString('zh-CN') }); await saveData('trade_logs', logs.slice(-50)); }
 
-function calcMA(data, period) { if (data.length < period) return 0; return data.slice(-period).reduce((sum, c) => sum + c.close, 0) / period; }
-function calcRSI(data, period = 14) { if (data.length < period + 1) return 50; let gains = 0, losses = 0; for (let i = data.length - period; i < data.length; i++) { const diff = data[i].close - data[i-1].close; if (diff > 0) gains += diff; else losses -= diff; } const avgLoss = losses / period; if (avgLoss === 0) return 100; return 100 - (100 / (1 + (gains / period) / avgLoss)); }
-function calcEMA(data, period) {
-    if (data.length < period) return data[data.length-1].close;
-    let sum = 0; for(let i=0; i<period; i++) sum += data[i].close;
-    let ema = sum / period; 
-    const k = 2 / (period + 1);
-    for (let i = period; i < data.length; i++) { ema = (data[i].close - ema) * k + ema; }
-    return ema;
-}
+// 指标计算
+function calcMA(data, p) { if (data.length < p) return 0; return data.slice(-p).reduce((sum, c) => sum + c.close, 0) / p; }
+function calcRSI(data, p = 14) { if (data.length < p + 1) return 50; let g = 0, l = 0; for (let i = data.length - p; i < data.length; i++) { const diff = data[i].close - data[i-1].close; if (diff > 0) g += d; else l -= diff; } const avgLoss = l / p; if (avgLoss === 0) return 100; return 100 - (100 / (1 + (g / p) / avgLoss)); }
+function calcATR(data, p = 14) { if (data.length < p + 1) return 0; let sumTR = 0; for (let i = data.length - p; i < data.length; i++) { const h = data[i].high, l = data[i].low, pc = data[i-1].close; sumTR += Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)); } return sumTR / p; }
+function calcEMA(data, p) { if (data.length < p) return data[data.length-1].close; let sum = 0; for(let i=0; i<p; i++) sum += data[i].close; let ema = sum / p; const k = 2 / (p + 1); for (let i = p; i < data.length; i++) { ema = (data[i].close - ema) * k + ema; } return ema; }
 
 // ==========================================
-// 🧠 修复：强化做空与 HOLD 机制的 AI Prompt
+// 🧠 AI 寻找入场点 (专注右侧交易)
 // ==========================================
-async function askAIBatchDecisions(batchData) {
-  if (!DEEPSEEK_API_KEY || batchData.length === 0) return [];
-  // 🔥 核心重写：强制 AI 认识到做空和持有的选项，取代过去的 WAIT
-  const prompt = `你是量化机器人。根据以下数据做出交易决策。
-【重要指令】：
-1. 如果均线呈空头排列 (如现价低于MA5和MA20)，必须果断输出 SHORT (做空)，不要幻想抄底！
-2. 如果当前有持仓且趋势未坏，输出 HOLD (持有)。
-3. 只有当趋势反转需要止盈/止损时，才输出 CLOSE (平仓)。
-4. 没有持仓且不符合开仓条件时，输出 WAIT。
-严格返回 JSON 数组：[{"symbol": "ETHUSDT", "direction": "LONG/SHORT/HOLD/CLOSE/WAIT", "win_rate": 85, "reason": "理由"}]
-数据：${JSON.stringify(batchData)}`;
-  
+async function askAIForEntry(marketData) {
+  if (!DEEPSEEK_API_KEY) return null;
+  const prompt = `你是顶级游资量化模型。你的任务是寻找高确定性的“右侧进场点”。
+当前市场数据：${JSON.stringify(marketData)}
+【交易纪律】：
+1. 顺势而为：如果 4H 趋势是 BULL（牛市），只能做 LONG（多）或 WAIT（等待）；如果是 BEAR（熊市），只能做 SHORT（空）或 WAIT。
+2. 拒绝接飞刀：如果 15m 还在暴跌（连收阴线），绝不进场！必须等 15m 出现止跌企稳的阳线（重回MA5上方）才允许做多。这叫右侧确认！
+3. 风控第一：如果决定开仓，必须基于 ATR 或近期支撑/阻力位，给出明确的止损价 (sl) 和止盈价 (tp)！盈亏比至少 1:1.5。
+【输出格式】严格返回 JSON，不要有任何多余文字：
+{"direction": "LONG/SHORT/WAIT", "sl": 具体的止损价格数字, "tp": 具体的止盈价格数字, "reason": "你的判断逻辑"}`;
+
   try {
     const res = await postJSON("https://api.deepseek.com/chat/completions", { model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.1 }, { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` });
     let jsonStr = res.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```json/gi, '').replace(/```/g, '').trim();
     return JSON.parse(jsonStr);
-  } catch (e) { return []; }
-}
-
-async function runMonitor() {
-  if (!isMonitoringActive) return;
-  let batchData = [];
-  
-  for (const symbol of SYMBOLS) {
-      try {
-        const data4h = await fetchJSON(`https://api.binance.us/api/v3/klines?symbol=${symbol}&interval=${TREND_TIMEFRAME}&limit=250`);
-        const ema200_4h = calcEMA(data4h.map(d => ({ close: +d[4] })), 200);
-        
-        const data15m = await fetchJSON(`https://api.binance.us/api/v3/klines?symbol=${symbol}&interval=${TIMEFRAME}&limit=50`);
-        const candles15m = data15m.map(d => ({ open: +d[1], high: +d[2], low: +d[3], close: +d[4] }));
-        const currentPrice = candles15m[candles15m.length - 1].close;
-        lastPrices[symbol] = currentPrice;
-        
-        const ma5 = calcMA(candles15m, 5), ma20 = calcMA(candles15m, 20), rsi = calcRSI(candles15m, 14);
-        
-        const isBearTrend = currentPrice < ema200_4h;
-
-        // 🛑 硬止损保护保留
-        if (positions[symbol] && entryPrices[symbol]) {
-            const lossPercent = positions[symbol] === 'LONG' 
-                ? ((entryPrices[symbol] - currentPrice) / entryPrices[symbol]) * 100
-                : ((currentPrice - entryPrices[symbol]) / entryPrices[symbol]) * 100;
-
-            if (lossPercent >= 5.0) {
-                await sendSignalEmail("🩸 强制熔断平仓", `亏损触及 5% 底线，系统已强制越权平仓！`, currentPrice, TIMEFRAME, symbol);
-                await sendWeChatPush(`🚨 ${symbol} 强制平仓`, `当前浮亏过大，触发保本协议。`);
-                positions[symbol] = null; entryPrices[symbol] = null; entryTimes[symbol] = 0;
-                continue; 
-            }
-        }
-
-        batchData.push({ symbol, currentPrice, ma5, ma20, rsi, isBearTrend, currentPos: positions[symbol] || 'NONE' });
-      } catch (e) {}
-  }
-
-  if (batchData.length > 0) {
-      const results = await askAIBatchDecisions(batchData);
-      if (!Array.isArray(results)) return;
-
-      for (const res of results) {
-          if (!res || !res.symbol || !res.direction) continue; 
-          const sym = res.symbol;
-          let dir = res.direction.toUpperCase();
-          const targetData = batchData.find(b => b.symbol === sym);
-
-          // ⚖️ VETO 系统：拒绝逆势操作
-          if (dir === 'LONG' && targetData.isBearTrend) {
-              dir = 'WAIT'; res.reason = "【拦截】4H熊市，禁止做多";
-          } else if (dir === 'SHORT' && !targetData.isBearTrend) {
-              dir = 'WAIT'; res.reason = "【拦截】4H牛市，禁止做空";
-          }
-
-          // 🔥 核心修复：HOLD 状态处理 和 持仓时间保护
-          if (dir === 'HOLD' || dir === positions[sym]) continue; // 保持现状，直接跳过
-
-          // 只有当 AI 明确发出 CLOSE，或者给出反向交易信号时，才考虑平仓
-          if (dir === 'CLOSE' || dir === 'WAIT' || (positions[sym] && dir !== positions[sym])) {
-              if (positions[sym]) {
-                  // ⏳ 时间保护伞：开仓不足 30 分钟，系统拒绝 AI 的平仓请求（除非打到上面 5% 硬止损）
-                  const holdTimeMins = (Date.now() - entryTimes[sym]) / (1000 * 60);
-                  if (holdTimeMins < 30) {
-                      console.log(`⏳ 时间保护生效：${sym} 开仓仅 ${holdTimeMins.toFixed(1)} 分钟，拒绝提早平仓。`);
-                      continue; 
-                  }
-
-                  await sendSignalEmail("🏳️ 平仓收网", res.reason, lastPrices[sym], TIMEFRAME, sym);
-                  await sendWeChatPush(`平仓: ${sym}`, `持仓时间: ${holdTimeMins.toFixed(0)}分钟\n理由: ${res.reason}`);
-                  positions[sym] = null; entryPrices[sym] = null; entryTimes[sym] = 0;
-              }
-          } 
-          
-          // 新开仓逻辑
-          if ((dir === 'LONG' || dir === 'SHORT') && !positions[sym] && parseInt(res.win_rate || 0) >= 60) {
-              positions[sym] = dir;
-              entryPrices[sym] = lastPrices[sym]; 
-              entryTimes[sym] = Date.now(); // 记录入场时间点
-              await sendSignalEmail(`🎯 开仓: ${dir}`, res.reason, lastPrices[sym], TIMEFRAME, sym);
-              await sendWeChatPush(`开仓: ${sym} ${dir}`, `胜率: ${res.win_rate}%\n逻辑: ${res.reason}`);
-              await addTradeLog(sym, dir, 'STEADY', lastPrices[sym]);
-          }
-      }
-  }
+  } catch (e) { return { direction: 'WAIT', reason: 'AI 引擎解析失败' }; }
 }
 
 // ==========================================
-// 🌐 API 接口与启动
+// 🛡️ 核心引擎：机械哨兵系统
+// ==========================================
+async function runMonitor() {
+  if (!isMonitoringActive) return;
+
+  try {
+    // 1. 获取行情数据
+    const data4h = await fetchJSON(`https://api.binance.us/api/v3/klines?symbol=ETHUSDT&interval=${TREND_TIMEFRAME}&limit=250`);
+    const ema200_4h = calcEMA(data4h.map(d => ({ close: +d[4] })), 200);
+    
+    const data15m = await fetchJSON(`https://api.binance.us/api/v3/klines?symbol=ETHUSDT&interval=${TIMEFRAME}&limit=50`);
+    const candles15m = data15m.map(d => ({ open: +d[1], high: +d[2], low: +d[3], close: +d[4] }));
+    const currentPrice = candles15m[candles15m.length - 1].close;
+    lastPrice = currentPrice;
+    
+    const ma5 = calcMA(candles15m, 5), atr = calcATR(candles15m, 14), rsi = calcRSI(candles15m, 14);
+    const trend4h = currentPrice > ema200_4h ? 'BULL' : 'BEAR'; // 判断牛熊大势
+
+    // ==========================================
+    // 🤖 状态一：有持仓 -> 机械托管，拒绝 AI 干预
+    // ==========================================
+    if (position.status !== 'NONE') {
+        let isClosed = false;
+        let closeReason = "";
+
+        if (position.status === 'LONG') {
+            if (currentPrice <= position.sl) { isClosed = true; closeReason = "🩸 触发止损，砍仓保本"; }
+            else if (currentPrice >= position.tp) { isClosed = true; closeReason = "💰 触发止盈，落袋为安"; }
+        } 
+        else if (position.status === 'SHORT') {
+            if (currentPrice >= position.sl) { isClosed = true; closeReason = "🩸 触发止损，砍仓保本"; }
+            else if (currentPrice <= position.tp) { isClosed = true; closeReason = "💰 触发止盈，落袋为安"; }
+        }
+
+        // 执行机械平仓
+        if (isClosed) {
+            const pnl = position.status === 'LONG' ? ((currentPrice - position.entryPrice)/position.entryPrice)*100 : ((position.entryPrice - currentPrice)/position.entryPrice)*100;
+            await sendSignalEmail(`🏳️ 机械平仓: ${closeReason}`, `持仓方向: ${position.status}<br>开仓价: ${position.entryPrice}<br>平仓价: ${currentPrice}<br>现货盈亏幅: ${pnl.toFixed(2)}%`, currentPrice, TIMEFRAME, "ETHUSDT");
+            await sendWeChatPush(`机械平仓提醒`, `结果: ${closeReason}\n现货盈亏: ${pnl.toFixed(2)}%`);
+            
+            // 清空阵地，准备下一次狩猎
+            position = { status: 'NONE', entryPrice: null, sl: null, tp: null, entryTime: null };
+        } else {
+            console.log(`🛡️ 机械哨兵盯盘中... 当前价: ${currentPrice} | 止损: ${position.sl} | 止盈: ${position.tp}`);
+        }
+        return; // 持仓期间，直接 return，坚决不问 AI
+    }
+
+    // ==========================================
+    // 🐺 状态二：空仓 -> 呼叫 AI 寻找入场机会
+    // ==========================================
+    const marketData = { currentPrice, ma5, rsi, atr, trend4h };
+    const aiDecision = await askAIForEntry(marketData);
+
+    if (aiDecision && (aiDecision.direction === 'LONG' || aiDecision.direction === 'SHORT')) {
+        let dir = aiDecision.direction;
+
+        // ⚖️ 底层军规 VETO：防止 AI 脑抽逆势
+        if (dir === 'LONG' && trend4h === 'BEAR') {
+            console.log("❌ VETO: 拒绝在 4H 熊市中做多"); return;
+        }
+        if (dir === 'SHORT' && trend4h === 'BULL') {
+            console.log("❌ VETO: 拒绝在 4H 牛市中做空"); return;
+        }
+        // 确保 AI 给出了合法的止盈止损
+        if (!aiDecision.sl || !aiDecision.tp) {
+            console.log("❌ VETO: AI 未提供明确止损止盈，拒绝开单"); return;
+        }
+
+        // 🎯 执行开单，签下“生死状”
+        position.status = dir;
+        position.entryPrice = currentPrice;
+        position.sl = parseFloat(aiDecision.sl);
+        position.tp = parseFloat(aiDecision.tp);
+        position.entryTime = Date.now();
+
+        await sendSignalEmail(`🎯 右侧猎手入场: ${dir}`, `入场价: ${currentPrice}<br><b>🛑 铁血止损 (SL): ${position.sl}</b><br><b>💰 目标止盈 (TP): ${position.tp}</b><br>逻辑: ${aiDecision.reason}`, currentPrice, TIMEFRAME, "ETHUSDT");
+        await sendWeChatPush(`🎯 猎手入场: ${dir}`, `入场: ${currentPrice}\n止损: ${position.sl}\n止盈: ${position.tp}\n逻辑: ${aiDecision.reason}`);
+        await addTradeLog(dir, currentPrice, position.sl, position.tp, aiDecision.reason);
+    }
+
+  } catch (e) { console.log("监控异常:", e.message); }
+}
+
+// ==========================================
+// 🌐 API 接口
 // ==========================================
 http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  if (req.url === '/status') { res.end(JSON.stringify({ status: "alive", mode: "God Mode V2", isMonitoringActive })); return; }
+  if (req.url === '/status') { res.end(JSON.stringify({ status: "alive", mode: "Mechanical OCO Hunter", isMonitoringActive, currentPosition: position })); return; }
   if (req.url === '/api/logs') { const logs = await loadData('trade_logs'); res.end(JSON.stringify(logs.reverse())); return; }
   if (req.url === '/api/toggle-monitor' && req.method === 'POST') { isMonitoringActive = !isMonitoringActive; res.end(JSON.stringify({success:true})); return; }
-  res.end("System Running V2");
+  res.end("System Running: OCO Mode");
 }).listen(process.env.PORT || 3000);
 
 setInterval(runMonitor, CHECK_INTERVAL_MS); 
