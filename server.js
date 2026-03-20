@@ -12,8 +12,8 @@ const KV_REST_API_URL = "https://exact-sparrow-75815.upstash.io";
 
 const SYMBOLS = ["ETHUSDT"]; // 专注以太坊
 const TIMEFRAME = "15m"; // 主力作战周期
-const TREND_TIMEFRAME = "1h"; // 🔥 改动1：大局观降维到 1 小时，极大解放开火权
-const CHECK_INTERVAL_MS = 2 * 60 * 1000; // 🔥 改动2：巡逻频率加快到 2 分钟一次
+const TREND_TIMEFRAME = "1h"; // 大局观：1 小时
+const CHECK_INTERVAL_MS = 2 * 60 * 1000; // 巡逻频率：2 分钟一次
 const ALERT_CHECK_INTERVAL = 10 * 1000; 
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY; 
@@ -34,7 +34,7 @@ let lastPrice = null;
 let isMonitoringActive = true; 
 let inMemoryDB = { trade_logs: [], price_alerts: [] }; 
 
-console.log("🔫 15分钟短线刺客版 (1H顺势 + 机械 OCO) 已上线...");
+console.log("🔫 15分钟短线刺客版 (完美修复防报错版) 已上线...");
 
 // ==========================================
 // 📦 工具函数
@@ -54,7 +54,7 @@ function postJSON(url, body, extraHeaders) {
 
 function fetchJSON(url) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'Assassin-Bot/4.0' } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': 'Assassin-Bot/4.1' } }, (res) => {
       let data = ''; res.on('data', chunk => data += chunk);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } });
     }).on('error', reject);
@@ -91,7 +91,6 @@ function calcEMA(data, p) { if (data.length < p) return data[data.length-1].clos
 // ==========================================
 async function askAIForEntry(marketData) {
   if (!DEEPSEEK_API_KEY) return null;
-  // 🔥 改动3：刺客专属提示词
   const prompt = `你是币圈极其敏锐的“15分钟级短线刺客”（Day Trader）。你的任务是寻找15分钟K线级别的突破或快速反弹机会。
 当前市场数据：${JSON.stringify(marketData)}
 【短线刺客纪律】：
@@ -130,7 +129,7 @@ async function runMonitor() {
     lastPrice = currentPrice;
     
     const ma5 = calcMA(candles15m, 5), atr = calcATR(candles15m, 14), rsi = calcRSI(candles15m, 14);
-    const trend1h = currentPrice > ema200_1h ? 'BULL' : 'BEAR'; // 判断 1H 短期牛熊
+    const trend1h = currentPrice > ema200_1h ? 'BULL' : 'BEAR'; 
 
     // ==========================================
     // 🤖 状态一：有持仓 -> 机械托管，拒绝 AI 干预
@@ -150,8 +149,13 @@ async function runMonitor() {
 
         if (isClosed) {
             const pnl = position.status === 'LONG' ? ((currentPrice - position.entryPrice)/position.entryPrice)*100 : ((position.entryPrice - currentPrice)/position.entryPrice)*100;
-            await sendSignalEmail(`🏳️ 刺客收网: ${closeReason}`, `持仓方向: ${position.status}<br>开仓价: ${position.entryPrice}<br>平仓价: ${currentPrice}<br>现货盈亏幅: ${pnl.toFixed(2)}%`, currentPrice, TIMEFRAME, "ETHUSDT");
-            await sendWeChatPush(`短线平仓提醒`, `结果: ${closeReason}\n现货盈亏: ${pnl.toFixed(2)}%`);
+            
+            // ✅ 修复：将超长字符串拆成变量，防止复制断行报错
+            const closeEmailMsg = `持仓方向: ${position.status}<br>开仓价: ${position.entryPrice}<br>平仓价: ${currentPrice}<br>现货盈亏幅: ${pnl.toFixed(2)}%`;
+            await sendSignalEmail(`🏳️ 刺客收网: ${closeReason}`, closeEmailMsg, currentPrice, TIMEFRAME, "ETHUSDT");
+            
+            const closeWxMsg = `结果: ${closeReason}\n现货盈亏: ${pnl.toFixed(2)}%`;
+            await sendWeChatPush(`短线平仓提醒`, closeWxMsg);
             
             position = { status: 'NONE', entryPrice: null, sl: null, tp: null, entryTime: null };
         } else {
@@ -169,7 +173,7 @@ async function runMonitor() {
     if (aiDecision && (aiDecision.direction === 'LONG' || aiDecision.direction === 'SHORT')) {
         let dir = aiDecision.direction;
 
-        // ⚖️ VETO 拦截：依然保留对 1H 趋势的敬畏
+        // ⚖️ VETO 拦截
         if (dir === 'LONG' && trend1h === 'BEAR') { console.log("❌ 拦截：拒绝 1H 熊市做多"); return; }
         if (dir === 'SHORT' && trend1h === 'BULL') { console.log("❌ 拦截：拒绝 1H 牛市做空"); return; }
         if (!aiDecision.sl || !aiDecision.tp) { console.log("❌ 拦截：未提供明确风控线"); return; }
@@ -181,4 +185,66 @@ async function runMonitor() {
         position.tp = parseFloat(aiDecision.tp);
         position.entryTime = Date.now();
 
-        await sendSignalEmail(`🎯 刺客入场: ${dir}`, `入场价: ${currentPrice}<br><b>🛑 极速止损 (SL): ${p
+        // ✅ 修复：将超长字符串拆成变量，防止复制断行报错
+        const openEmailMsg = `入场价: ${currentPrice}<br><b>🛑 极速止损 (SL): ${position.sl}</b><br><b>💰 目标止盈 (TP): ${position.tp}</b><br>逻辑: ${aiDecision.reason}`;
+        await sendSignalEmail(`🎯 刺客入场: ${dir}`, openEmailMsg, currentPrice, TIMEFRAME, "ETHUSDT");
+        
+        const openWxMsg = `入场: ${currentPrice}\n止损: ${position.sl}\n止盈: ${position.tp}\n逻辑: ${aiDecision.reason}`;
+        await sendWeChatPush(`🎯 刺客入场: ${dir}`, openWxMsg);
+        
+        await addTradeLog(dir, currentPrice, position.sl, position.tp, aiDecision.reason);
+    }
+
+  } catch (e) { console.log("监控异常:", e.message); }
+}
+
+// ==========================================
+// ☁️ 独立云端价格提醒引擎
+// ==========================================
+async function runAlertEngine() {
+    try {
+        const alerts = await loadData('price_alerts'); if (!alerts || alerts.length === 0) return;
+        const res = await fetchJSON('https://api.binance.us/api/v3/ticker/price?symbol=ETHUSDT');
+        if(!res || !res.price) return;
+        const cur = parseFloat(res.price);
+        let triggered = false; const remainingAlerts = [];
+        for (const alert of alerts) {
+            if ((alert.dir === 'above' && cur >= alert.price) || (alert.dir === 'below' && cur <= alert.price)) {
+                await sendWeChatPush(`🚨 价格云端提醒`, `ETHUSDT 到达 ${cur}`);
+                triggered = true;
+            } else { remainingAlerts.push(alert); }
+        }
+        if (triggered) await saveData('price_alerts', remainingAlerts);
+    } catch(e) {}
+}
+
+// ==========================================
+// 🌐 API 接口
+// ==========================================
+http.createServer(async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
+
+  if (req.url === '/status') { res.end(JSON.stringify({ status: "alive", mode: "15m Scalping Assassin", isMonitoringActive, currentPosition: position })); return; }
+  if (req.url === '/api/logs') { const logs = await loadData('trade_logs'); res.end(JSON.stringify(logs.reverse())); return; }
+  if (req.url === '/api/toggle-monitor' && req.method === 'POST') { isMonitoringActive = !isMonitoringActive; res.end(JSON.stringify({success:true})); return; }
+  
+  if (req.url === '/api/alerts' && req.method === 'GET') { const alerts = await loadData('price_alerts'); res.end(JSON.stringify(alerts)); return; }
+  if (req.url === '/api/alerts' && req.method === 'POST') {
+      let body = ''; req.on('data', c => body += c.toString());
+      req.on('end', async () => { try { const newAlert = JSON.parse(body); const alerts = await loadData('price_alerts'); alerts.push({ id: Date.now().toString(), symbol: newAlert.symbol, price: newAlert.price, dir: newAlert.dir }); await saveData('price_alerts', alerts); res.end(JSON.stringify({success: true})); } catch(e) { res.end(JSON.stringify({success: false})); }}); return;
+  }
+  if (req.url === '/api/alerts' && req.method === 'DELETE') {
+      let body = ''; req.on('data', c => body += c.toString());
+      req.on('end', async () => { try { const { id } = JSON.parse(body); let alerts = await loadData('price_alerts'); alerts = alerts.filter(a => a.id !== id); await saveData('price_alerts', alerts); res.end(JSON.stringify({success: true})); } catch(e) { res.end(JSON.stringify({success: false})); }}); return;
+  }
+  
+  res.end("System Running: 15m Assassin Mode");
+}).listen(process.env.PORT || 3000);
+
+// 循环点火
+setInterval(runMonitor, CHECK_INTERVAL_MS); 
+setInterval(runAlertEngine, ALERT_CHECK_INTERVAL);
+runMonitor();
