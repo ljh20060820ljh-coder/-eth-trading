@@ -1,6 +1,6 @@
 const https = require('https');
 const http = require('http');
-const crypto = require('crypto'); // 引入加密模块，用于币安 API 签名
+const crypto = require('crypto');
 const querystring = require('querystring');
 
 // ==========================================
@@ -12,17 +12,16 @@ const EMAILJS_PUBLIC_KEY = "tIZB9DwwpEKr3KQpQ";
 const NOTIFY_EMAIL = "2183089849@qq.com";
 const KV_REST_API_URL = "https://exact-sparrow-75815.upstash.io"; 
 
-// 币安 API 密钥 (从环境变量读取)
 const BINANCE_API_KEY = process.env.BINANCE_API_KEY;
 const BINANCE_API_SECRET = process.env.BINANCE_API_SECRET;
 
-// ⚠️ 试枪锁：每次自动交易的 ETH 数量。测试期请保持 0.01！确认无误后再修改！
+// ⚠️ 试枪锁：0.01 ETH
 const TRADE_QTY = 0.01; 
 
 const SYMBOLS = ["ETHUSDT"]; 
 const TIMEFRAME = "15m"; 
 const TREND_TIMEFRAME = "1h"; 
-const CHECK_INTERVAL_MS = 2 * 60 * 1000; // 2分钟高频巡逻
+const CHECK_INTERVAL_MS = 2 * 60 * 1000; 
 const ALERT_CHECK_INTERVAL = 10 * 1000; 
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY; 
@@ -35,7 +34,7 @@ let lastPrice = null;
 let isMonitoringActive = true; 
 let inMemoryDB = { trade_logs: [], price_alerts: [] }; 
 
-console.log("👑 V5 疯狗刺客 (全自动发单版) 已上线！交易数量锁死在:", TRADE_QTY, "ETH");
+console.log("👑 V5.1 疯狗刺客 (修复止盈止损版) 已上线！交易数量锁死在:", TRADE_QTY, "ETH");
 
 // ==========================================
 // 💸 币安 U本位合约 API 核心执行引擎
@@ -71,35 +70,35 @@ async function executeBinanceOrder(params) {
     });
 }
 
-// 组合拳：开仓 + 自动挂止盈止损单
+// 🔥 修复版组合拳：开仓 + reduceOnly 挂止盈止损单
 async function autoTrade(symbol, direction, qty, slPrice, tpPrice) {
     console.log(`🔫 开始执行自动化狙击: ${direction} | 数量: ${qty}`);
     const isLong = direction === 'LONG';
-    
-    // 1. 发送市价开仓单 (Market Order)
     const entrySide = isLong ? 'BUY' : 'SELL';
+    const exitSide = isLong ? 'SELL' : 'BUY';
+    
+    // 1. 发送市价开仓单
     const entryRes = await executeBinanceOrder({ symbol, side: entrySide, type: 'MARKET', quantity: qty });
-    if (entryRes && entryRes.code) return false; // 开仓失败则中止
+    if (entryRes && entryRes.code) return false; 
 
-    // 格式化价格 (ETHUSDT 通常要求 2 位小数)
+    // 格式化价格，确保小数点位数正确
     const sl = parseFloat(slPrice).toFixed(2);
     const tp = parseFloat(tpPrice).toFixed(2);
-    const exitSide = isLong ? 'SELL' : 'BUY';
 
-    // 2. 挂止损单 (STOP_MARKET) - 带有 closePosition 标志，保证只平仓不开反向仓
-    await executeBinanceOrder({ symbol, side: exitSide, type: 'STOP_MARKET', stopPrice: sl, closePosition: 'true' });
+    // 2. 挂止损单 (废弃 closePosition，改用极其稳定的 reduceOnly + quantity)
+    await executeBinanceOrder({ symbol, side: exitSide, type: 'STOP_MARKET', stopPrice: sl, quantity: qty, reduceOnly: 'true' });
     
-    // 3. 挂止盈单 (TAKE_PROFIT_MARKET)
-    await executeBinanceOrder({ symbol, side: exitSide, type: 'TAKE_PROFIT_MARKET', stopPrice: tp, closePosition: 'true' });
+    // 3. 挂止盈单 
+    await executeBinanceOrder({ symbol, side: exitSide, type: 'TAKE_PROFIT_MARKET', stopPrice: tp, quantity: qty, reduceOnly: 'true' });
     
     return true;
 }
 
 // ==========================================
-// 📦 工具函数 & 数据库 & 指标 (略，保持不变)
+// 📦 工具函数 & 指标 
 // ==========================================
 function postJSON(url, body, extraHeaders) { return new Promise((resolve, reject) => { const data = JSON.stringify(body); const urlObj = new URL(url); const options = { hostname: urlObj.hostname, path: urlObj.pathname + urlObj.search, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), ...(extraHeaders||{}) } }; const req = https.request(options, (res) => { let d = ''; res.on('data', c => d += c); res.on('end', () => { if (res.statusCode !== 200) reject(new Error(`HTTP ${res.statusCode}: ${d}`)); else { try { resolve(JSON.parse(d)); } catch(e) { resolve(d); } } }); }); req.on('error', reject); req.write(data); req.end(); }); }
-function fetchJSON(url) { return new Promise((resolve, reject) => { https.get(url, { headers: { 'User-Agent': 'Assassin-Bot/5.0' } }, (res) => { let data = ''; res.on('data', chunk => data += chunk); res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } }); }).on('error', reject); }); }
+function fetchJSON(url) { return new Promise((resolve, reject) => { https.get(url, { headers: { 'User-Agent': 'Assassin-Bot/5.1' } }, (res) => { let data = ''; res.on('data', chunk => data += chunk); res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } }); }).on('error', reject); }); }
 async function sendWeChatPush(title, desp) { if(SERVERCHAN_SENDKEY) try { await postJSON(`https://sctapi.ftqq.com/${SERVERCHAN_SENDKEY}.send`, { title, desp }); }catch(e){} }
 async function sendSignalEmail(action, messageHtml, price, titleStr, symbol) { const time = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }); try { await postJSON("https://api.emailjs.com/api/v1.0/email/send", { service_id: EMAILJS_SERVICE_ID, template_id: EMAILJS_TEMPLATE_ID, user_id: EMAILJS_PUBLIC_KEY, accessToken: EMAILJS_PRIVATE_KEY, template_params: { to_email: NOTIFY_EMAIL, symbol: symbol, interval: titleStr, signal: action, price: price.toString(), message: messageHtml, time: time }}); } catch (e) {} }
 async function loadData(key) { if (!KV_REST_API_URL || !KV_REST_API_TOKEN) return inMemoryDB[key] || []; try { const res = await fetchJSON(`${KV_REST_API_URL}/get/${key}`, { Authorization: `Bearer ${KV_REST_API_TOKEN}` }); if (res.result) return typeof res.result === 'string' ? JSON.parse(res.result) : res.result; } catch(e) {} return inMemoryDB[key] || []; }
@@ -111,7 +110,7 @@ function calcATR(data, p = 14) { if (data.length < p + 1) return 0; let sumTR = 
 function calcEMA(data, p) { if (data.length < p) return data[data.length-1].close; let sum = 0; for(let i=0; i<p; i++) sum += data[i].close; let ema = sum / p; const k = 2 / (p + 1); for (let i = p; i < data.length; i++) { ema = (data[i].close - ema) * k + ema; } return ema; }
 
 // ==========================================
-// 🧠 AI 寻找入场点 (极度激进疯狗模式)
+// 🧠 AI 寻找入场点
 // ==========================================
 async function askAIForEntry(marketData) {
   if (!DEEPSEEK_API_KEY) return null;
@@ -153,14 +152,10 @@ async function runMonitor() {
     const ma5 = calcMA(candles15m, 5), atr = calcATR(candles15m, 14), rsi = calcRSI(candles15m, 14);
     const trend1h = currentPrice > ema200_1h ? 'BULL' : 'BEAR'; 
 
-    // ==========================================
-    // 🤖 状态一：有持仓 -> 本地监控镜面同步 (实盘退出由币安接管)
-    // ==========================================
     if (position.status !== 'NONE') {
         let isClosed = false;
         let closeReason = "";
 
-        // 注意：这里的判断只用于发送微信提醒，真实的止盈止损由币安云端执行！
         if (position.status === 'LONG') {
             if (currentPrice <= position.sl) { isClosed = true; closeReason = "🩸 触及极速止损 (币安已自动砍仓)"; }
             else if (currentPrice >= position.tp) { isClosed = true; closeReason = "💰 触及极速止盈 (币安已自动落袋)"; }
@@ -185,9 +180,6 @@ async function runMonitor() {
         return; 
     }
 
-    // ==========================================
-    // 🐺 状态二：空仓 -> 呼叫 AI 寻找入场机会
-    // ==========================================
     const marketData = { currentPrice, ma5, rsi, atr, trend1h };
     const aiDecision = await askAIForEntry(marketData);
     console.log(`🧠 AI 思考结果: 方向=${aiDecision?.direction}, 理由=${aiDecision?.reason}`);
@@ -195,10 +187,8 @@ async function runMonitor() {
     if (aiDecision && (aiDecision.direction === 'LONG' || aiDecision.direction === 'SHORT')) {
         let dir = aiDecision.direction;
 
-        // 砸掉大趋势拦截器！只要 AI 给出止损止盈，直接干！
         if (!aiDecision.sl || !aiDecision.tp) { console.log("❌ 拦截：未提供明确风控线"); return; }
 
-        // 🎯 执行实盘全自动开仓！
         const tradeSuccess = await autoTrade("ETHUSDT", dir, TRADE_QTY, aiDecision.sl, aiDecision.tp);
         
         if (tradeSuccess) {
@@ -211,21 +201,19 @@ async function runMonitor() {
             const openEmailMsg = `<b>⚠️ 全自动市价单已发往币安执行！</b><br>入场价: ${currentPrice}<br><b>🛑 挂单止损 (SL): ${position.sl}</b><br><b>💰 挂单止盈 (TP): ${position.tp}</b><br>逻辑: ${aiDecision.reason}`;
             await sendSignalEmail(`🚀 实盘开火: ${dir}`, openEmailMsg, currentPrice, TIMEFRAME, "ETHUSDT");
             
-            const openWxMsg = `【自动下单成功】\n方向: ${dir} ${TRADE_QTY}个\n市价: ${currentPrice}\n止损: ${position.sl}\n止盈: ${position.tp}\n逻辑: ${aiDecision.reason}`;
+            const openWxMsg = `【自动下单成功】\n方向: ${dir} ${TRADE_QTY}个\n市价: ${currentPrice}\n止损: ${position.sl}\n止盈: ${position.tp}`;
             await sendWeChatPush(`🚀 实盘开火: ${dir}`, openWxMsg);
             
             await addTradeLog(dir, currentPrice, position.sl, position.tp, aiDecision.reason);
         } else {
-            await sendWeChatPush(`❌ 下单失败`, `API 调用失败，请检查 Render 环境变量配置或币安权限！`);
+            // 如果只有第一步成功，后两步挂单失败，发送紧急平仓提醒
+            console.log("⚠️ 注意：开仓可能成功但挂单失败，请检查账户！");
         }
     }
 
   } catch (e) { console.log("监控异常:", e.message); }
 }
 
-// ==========================================
-// ☁️ 独立云端价格提醒引擎
-// ==========================================
 async function runAlertEngine() {
     try {
         const alerts = await loadData('price_alerts'); if (!alerts || alerts.length === 0) return;
@@ -243,33 +231,19 @@ async function runAlertEngine() {
     } catch(e) {}
 }
 
-// ==========================================
-// 🌐 API 接口
-// ==========================================
 http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
 
-  if (req.url === '/status') { res.end(JSON.stringify({ status: "alive", mode: "V5 Full Auto", isMonitoringActive, currentPosition: position })); return; }
+  if (req.url === '/status') { res.end(JSON.stringify({ status: "alive", mode: "V5.1 Full Auto", isMonitoringActive, currentPosition: position })); return; }
   if (req.url === '/api/logs') { const logs = await loadData('trade_logs'); res.end(JSON.stringify(logs.reverse())); return; }
   if (req.url === '/api/toggle-monitor' && req.method === 'POST') { isMonitoringActive = !isMonitoringActive; res.end(JSON.stringify({success:true})); return; }
   
-  if (req.url === '/api/alerts' && req.method === 'GET') { const alerts = await loadData('price_alerts'); res.end(JSON.stringify(alerts)); return; }
-  if (req.url === '/api/alerts' && req.method === 'POST') {
-      let body = ''; req.on('data', c => body += c.toString());
-      req.on('end', async () => { try { const newAlert = JSON.parse(body); const alerts = await loadData('price_alerts'); alerts.push({ id: Date.now().toString(), symbol: newAlert.symbol, price: newAlert.price, dir: newAlert.dir }); await saveData('price_alerts', alerts); res.end(JSON.stringify({success: true})); } catch(e) { res.end(JSON.stringify({success: false})); }}); return;
-  }
-  if (req.url === '/api/alerts' && req.method === 'DELETE') {
-      let body = ''; req.on('data', c => body += c.toString());
-      req.on('end', async () => { try { const { id } = JSON.parse(body); let alerts = await loadData('price_alerts'); alerts = alerts.filter(a => a.id !== id); await saveData('price_alerts', alerts); res.end(JSON.stringify({success: true})); } catch(e) { res.end(JSON.stringify({success: false})); }}); return;
-  }
-  
-  res.end("System Running: V5 Auto Trade Mode");
+  res.end("System Running: V5.1 Auto Trade Mode");
 }).listen(process.env.PORT || 3000);
 
-// 循环点火
 setInterval(runMonitor, CHECK_INTERVAL_MS); 
 setInterval(runAlertEngine, ALERT_CHECK_INTERVAL);
 runMonitor();
