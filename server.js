@@ -15,8 +15,7 @@ const KV_REST_API_URL = "https://exact-sparrow-75815.upstash.io";
 const BINANCE_API_KEY = process.env.BINANCE_API_KEY;
 const BINANCE_API_SECRET = process.env.BINANCE_API_SECRET;
 
-// ⚠️ 试枪锁：0.01 ETH
-const TRADE_QTY = 0.01; 
+const TRADE_QTY = 0.01; // 试枪锁
 
 const SYMBOLS = ["ETHUSDT"]; 
 const TIMEFRAME = "15m"; 
@@ -34,12 +33,12 @@ let lastPrice = null;
 let isMonitoringActive = true; 
 let inMemoryDB = { trade_logs: [], price_alerts: [] }; 
 
-console.log("👑 V5.1 疯狗刺客 (修复止盈止损版) 已上线！交易数量锁死在:", TRADE_QTY, "ETH");
+console.log("👑 V5.2 疯狗刺客 (Algo专属通道版) 已上线！交易数量锁死在:", TRADE_QTY, "ETH");
 
 // ==========================================
-// 💸 币安 U本位合约 API 核心执行引擎
+// 💸 币安 API 核心执行引擎 (双通道支持)
 // ==========================================
-async function executeBinanceOrder(params) {
+async function executeBinanceOrder(endpointPath, params) {
     if (!BINANCE_API_KEY || !BINANCE_API_SECRET) {
         console.log("⚠️ 缺失币安 API Key，无法执行实盘下单！");
         return null;
@@ -51,7 +50,7 @@ async function executeBinanceOrder(params) {
 
     const options = {
         hostname: 'fapi.binance.com',
-        path: '/fapi/v1/order',
+        path: endpointPath,
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-MBX-APIKEY': BINANCE_API_KEY }
     };
@@ -61,8 +60,8 @@ async function executeBinanceOrder(params) {
             let body = ''; res.on('data', chunk => body += chunk);
             res.on('end', () => {
                 const response = JSON.parse(body);
-                if (response.code) console.error("❌ 币安下单失败:", response);
-                else console.log(`✅ 币安下单成功: ${response.side} ${response.type} | 订单号: ${response.orderId}`);
+                if (response.code) console.error(`❌ 币安下单失败 [${endpointPath}]:`, response);
+                else console.log(`✅ 币安下单成功: ${params.side} ${params.type} | 返回流水号: ${response.orderId || response.algoId || 'AlgoSuccess'}`);
                 resolve(response);
             });
         });
@@ -70,26 +69,31 @@ async function executeBinanceOrder(params) {
     });
 }
 
-// 🔥 修复版组合拳：开仓 + reduceOnly 挂止盈止损单
+// 🔥 V5.2 修复版组合拳：普通通道开仓 + Algo通道挂止盈止损
 async function autoTrade(symbol, direction, qty, slPrice, tpPrice) {
     console.log(`🔫 开始执行自动化狙击: ${direction} | 数量: ${qty}`);
     const isLong = direction === 'LONG';
     const entrySide = isLong ? 'BUY' : 'SELL';
     const exitSide = isLong ? 'SELL' : 'BUY';
     
-    // 1. 发送市价开仓单
-    const entryRes = await executeBinanceOrder({ symbol, side: entrySide, type: 'MARKET', quantity: qty });
+    // 1. 发送市价开仓单 (走基础 /fapi/v1/order 通道)
+    const entryRes = await executeBinanceOrder('/fapi/v1/order', { symbol, side: entrySide, type: 'MARKET', quantity: qty });
     if (entryRes && entryRes.code) return false; 
 
-    // 格式化价格，确保小数点位数正确
     const sl = parseFloat(slPrice).toFixed(2);
     const tp = parseFloat(tpPrice).toFixed(2);
 
-    // 2. 挂止损单 (废弃 closePosition，改用极其稳定的 reduceOnly + quantity)
-    await executeBinanceOrder({ symbol, side: exitSide, type: 'STOP_MARKET', stopPrice: sl, quantity: qty, reduceOnly: 'true' });
+    // 2. 挂止损单 (走最新的 /fapi/v1/algoOrder 通道，必须带 algoType 和 triggerPrice)
+    await executeBinanceOrder('/fapi/v1/algoOrder', { 
+        algoType: 'CONDITIONAL', symbol, side: exitSide, type: 'STOP_MARKET', 
+        triggerPrice: sl, quantity: qty, reduceOnly: 'true' 
+    });
     
-    // 3. 挂止盈单 
-    await executeBinanceOrder({ symbol, side: exitSide, type: 'TAKE_PROFIT_MARKET', stopPrice: tp, quantity: qty, reduceOnly: 'true' });
+    // 3. 挂止盈单 (走最新的 /fapi/v1/algoOrder 通道)
+    await executeBinanceOrder('/fapi/v1/algoOrder', { 
+        algoType: 'CONDITIONAL', symbol, side: exitSide, type: 'TAKE_PROFIT_MARKET', 
+        triggerPrice: tp, quantity: qty, reduceOnly: 'true' 
+    });
     
     return true;
 }
@@ -98,7 +102,7 @@ async function autoTrade(symbol, direction, qty, slPrice, tpPrice) {
 // 📦 工具函数 & 指标 
 // ==========================================
 function postJSON(url, body, extraHeaders) { return new Promise((resolve, reject) => { const data = JSON.stringify(body); const urlObj = new URL(url); const options = { hostname: urlObj.hostname, path: urlObj.pathname + urlObj.search, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), ...(extraHeaders||{}) } }; const req = https.request(options, (res) => { let d = ''; res.on('data', c => d += c); res.on('end', () => { if (res.statusCode !== 200) reject(new Error(`HTTP ${res.statusCode}: ${d}`)); else { try { resolve(JSON.parse(d)); } catch(e) { resolve(d); } } }); }); req.on('error', reject); req.write(data); req.end(); }); }
-function fetchJSON(url) { return new Promise((resolve, reject) => { https.get(url, { headers: { 'User-Agent': 'Assassin-Bot/5.1' } }, (res) => { let data = ''; res.on('data', chunk => data += chunk); res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } }); }).on('error', reject); }); }
+function fetchJSON(url) { return new Promise((resolve, reject) => { https.get(url, { headers: { 'User-Agent': 'Assassin-Bot/5.2' } }, (res) => { let data = ''; res.on('data', chunk => data += chunk); res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(e); } }); }).on('error', reject); }); }
 async function sendWeChatPush(title, desp) { if(SERVERCHAN_SENDKEY) try { await postJSON(`https://sctapi.ftqq.com/${SERVERCHAN_SENDKEY}.send`, { title, desp }); }catch(e){} }
 async function sendSignalEmail(action, messageHtml, price, titleStr, symbol) { const time = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }); try { await postJSON("https://api.emailjs.com/api/v1.0/email/send", { service_id: EMAILJS_SERVICE_ID, template_id: EMAILJS_TEMPLATE_ID, user_id: EMAILJS_PUBLIC_KEY, accessToken: EMAILJS_PRIVATE_KEY, template_params: { to_email: NOTIFY_EMAIL, symbol: symbol, interval: titleStr, signal: action, price: price.toString(), message: messageHtml, time: time }}); } catch (e) {} }
 async function loadData(key) { if (!KV_REST_API_URL || !KV_REST_API_TOKEN) return inMemoryDB[key] || []; try { const res = await fetchJSON(`${KV_REST_API_URL}/get/${key}`, { Authorization: `Bearer ${KV_REST_API_TOKEN}` }); if (res.result) return typeof res.result === 'string' ? JSON.parse(res.result) : res.result; } catch(e) {} return inMemoryDB[key] || []; }
@@ -198,7 +202,7 @@ async function runMonitor() {
             position.tp = parseFloat(aiDecision.tp);
             position.entryTime = Date.now();
 
-            const openEmailMsg = `<b>⚠️ 全自动市价单已发往币安执行！</b><br>入场价: ${currentPrice}<br><b>🛑 挂单止损 (SL): ${position.sl}</b><br><b>💰 挂单止盈 (TP): ${position.tp}</b><br>逻辑: ${aiDecision.reason}`;
+            const openEmailMsg = `<b>⚠️ 全自动市价单与 Algo 止损单已发往币安执行！</b><br>入场价: ${currentPrice}<br><b>🛑 挂单止损 (SL): ${position.sl}</b><br><b>💰 挂单止盈 (TP): ${position.tp}</b><br>逻辑: ${aiDecision.reason}`;
             await sendSignalEmail(`🚀 实盘开火: ${dir}`, openEmailMsg, currentPrice, TIMEFRAME, "ETHUSDT");
             
             const openWxMsg = `【自动下单成功】\n方向: ${dir} ${TRADE_QTY}个\n市价: ${currentPrice}\n止损: ${position.sl}\n止盈: ${position.tp}`;
@@ -206,8 +210,7 @@ async function runMonitor() {
             
             await addTradeLog(dir, currentPrice, position.sl, position.tp, aiDecision.reason);
         } else {
-            // 如果只有第一步成功，后两步挂单失败，发送紧急平仓提醒
-            console.log("⚠️ 注意：开仓可能成功但挂单失败，请检查账户！");
+            console.log("⚠️ 注意：开仓失败或遇到异常。");
         }
     }
 
@@ -237,11 +240,11 @@ http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
 
-  if (req.url === '/status') { res.end(JSON.stringify({ status: "alive", mode: "V5.1 Full Auto", isMonitoringActive, currentPosition: position })); return; }
+  if (req.url === '/status') { res.end(JSON.stringify({ status: "alive", mode: "V5.2 Full Auto", isMonitoringActive, currentPosition: position })); return; }
   if (req.url === '/api/logs') { const logs = await loadData('trade_logs'); res.end(JSON.stringify(logs.reverse())); return; }
   if (req.url === '/api/toggle-monitor' && req.method === 'POST') { isMonitoringActive = !isMonitoringActive; res.end(JSON.stringify({success:true})); return; }
   
-  res.end("System Running: V5.1 Auto Trade Mode");
+  res.end("System Running: V5.2 Auto Trade Mode (Algo Endpoint)");
 }).listen(process.env.PORT || 3000);
 
 setInterval(runMonitor, CHECK_INTERVAL_MS); 
