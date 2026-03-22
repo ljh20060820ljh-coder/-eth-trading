@@ -59,6 +59,7 @@ let inMemoryDB = {
 }; 
 
 console.log("👑 V9.5 极简老板版 (修复复制Bug + 报表大瘦身) 丝滑上线！🚀");
+
 // ==========================================
 // 💸 币安 API 核心引擎
 // ==========================================
@@ -126,6 +127,7 @@ async function closePositionAndCancelOrders(symbol, direction, qty) {
     await executeBinanceOrder('/fapi/v1/order', { symbol, side: exitSide, type: 'MARKET', quantity: roundQty(symbol, qty), reduceOnly: 'true' });
     return true;
 }
+
 // 财务与风控清算系统
 async function syncRealPositions() {
     const riskRes = await executeBinanceOrder('/fapi/v2/positionRisk', {}, 'GET');
@@ -188,7 +190,9 @@ async function syncRealPositions() {
             }
         });
     }
-    // ==========================================
+}
+
+// ==========================================
 // 📦 工具与算法
 // ==========================================
 function postJSON(url, body, extraHeaders) { return new Promise((resolve, reject) => { const data = JSON.stringify(body); const urlObj = new URL(url); const options = { hostname: urlObj.hostname, path: urlObj.pathname + urlObj.search, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), ...(extraHeaders||{}) } }; const req = https.request(options, (res) => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { resolve(d); } }); }); req.on('error', reject); req.write(data); req.end(); }); }
@@ -228,7 +232,8 @@ async function askAIForEntry(symbol, data15m, data4h, strategy) {
     return { direction: 'WAIT', confidence: 0 };
   } catch (e) { return { direction: 'WAIT', confidence: 0 }; }
 }
-    // ==========================================
+
+// ==========================================
 // 🛡️ 核心引擎循环
 // ==========================================
 async function runMonitor() {
@@ -422,5 +427,3 @@ setInterval(runMonitor, CHECK_INTERVAL_MS);
 setInterval(runHourlyReport, 60 * 60 * 1000); 
 setInterval(runDailyAIReview, 24 * 60 * 60 * 1000); 
 runMonitor();
-    
-}
