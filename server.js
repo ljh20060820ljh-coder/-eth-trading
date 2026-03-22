@@ -6,7 +6,7 @@ const querystring = require('querystring');
 // ==========================================
 // 🔐 核心配置区 (请填入你的飞书 Webhook)
 // ==========================================
-const FEISHU_WEBHOOK_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/6099f609-41c4-4364-b0d8-fdb986b821a2"; 
+const FEISHU_WEBHOOK_URL = "这里填入你的飞书Webhook地址"; 
 
 const BINANCE_API_KEY = process.env.BINANCE_API_KEY;
 const BINANCE_API_SECRET = process.env.BINANCE_API_SECRET;
@@ -31,29 +31,24 @@ SYMBOLS.forEach(sym => {
 
 let inMemoryDB = { wins: 0, losses: 0, totalPnl: 0, startTime: new Date().toLocaleString() };
 
-console.log("🚀 V10.0 圣光战车启动！飞书雷达已挂载，95%逆势格杀令已授权！");
+console.log("🚀 V10.1 探照灯版启动！飞书雷达就绪，AI 思考日志已全面开启可视！");
 
 // ==========================================
-// 📡 飞书推送引擎 (无限量、秒级、免费)
+// 📡 飞书推送引擎
 // ==========================================
 async function sendFeishu(title, message) {
     if (!FEISHU_WEBHOOK_URL || FEISHU_WEBHOOK_URL.includes("这里填入")) return;
     const content = `【${title}】\n------------------\n${message}\n时间: ${new Date().toLocaleString()}`;
-    const data = JSON.stringify({
-        msg_type: "text",
-        content: { text: content }
-    });
+    const data = JSON.stringify({ msg_type: "text", content: { text: content } });
     const url = new URL(FEISHU_WEBHOOK_URL);
-    const options = {
-        hostname: url.hostname, path: url.pathname + url.search,
-        method: 'POST', headers: { 'Content-Type': 'application/json' }
-    };
-    const req = https.request(options);
-    req.write(data); req.end();
+    const options = { hostname: url.hostname, path: url.pathname + url.search, method: 'POST', headers: { 'Content-Type': 'application/json' } };
+    const req = https.request(options); req.write(data); req.end();
 }
 
+// 📡 开机自检播报
+sendFeishu("📡 战车上线自检", "长官，V10.1 探照灯版已在云端点火！通讯正常，24小时全天候扫描战场！");
 // ==========================================
-// 💸 币安执行模块 (同前)
+// 💸 币安执行模块
 // ==========================================
 async function binanceReq(path, params, method = 'POST') {
     params.timestamp = Date.now();
@@ -100,7 +95,6 @@ async function syncPositions() {
             let pnl = p.status === 'LONG' ? (p.lastKnownPrice - p.entryPrice) * p.qty : (p.entryPrice - p.lastKnownPrice) * p.qty;
             if (pnl > 0) inMemoryDB.wins++; else inMemoryDB.losses++;
             inMemoryDB.totalPnl += pnl;
-            // 💡 0.6% 浮盈大赦逻辑
             if (p.maxMFEPercent >= 0.6 || pnl > 0) {
                 p.consecutiveLosses = 0; p.lastCloseTime = 0;
                 sendFeishu("💰 战斗总结", `[${symbol}] 胜利！平仓盈亏: ${pnl.toFixed(3)}U。刑期已豁免归零。`);
@@ -113,9 +107,8 @@ async function syncPositions() {
         }
     }
 }
-
 // ==========================================
-// 🛡️ 核心决策引擎 (95% 逆势格杀令)
+// 🛡️ 核心决策引擎 (全透明呼吸灯)
 // ==========================================
 async function runMonitor() {
     try {
@@ -140,6 +133,7 @@ async function runMonitor() {
                     p.amnestyNotified = true;
                     sendFeishu("⭐ 浮盈过线", `[${symbol}] 浮盈达 ${mfe.toFixed(2)}%。已开启大赦保底！`);
                 }
+                console.log(`🛡️ [${symbol}] 持仓中 | 现价:${curP} | 最高浮盈:${p.maxMFEPercent.toFixed(2)}%`);
                 continue;
             }
 
@@ -148,39 +142,35 @@ async function runMonitor() {
             const isLock = p.lastCloseTime > 0 && remains > 0;
 
             const ai = await askAI(symbol, { curP, rsi: calcRSI(c15) }, { ema50: calcEMA(r4h.map(d=>({c:+d[4]})), 50) });
+            
+            // 🔥 V10.1 核心恢复：AI 思考探照灯 (每2分钟打印一次，让你清清楚楚！)
+            console.log(`🧠 [${symbol}] AI探测: ${ai.direction} | 把握: ${ai.confidence}% | 逻辑: ${ai.reason || '无'}`);
+
             if (ai.direction === 'WAIT') continue;
 
-            // 越狱与均线逻辑
             let canGo = false, isJJ = false;
             const ema50_4h = calcEMA(r4h.map(d=>({c:+d[4]})), 50);
 
-            // 🔥 🔥 V10.0 特权：95% 圣光格杀令 (无视时间，无视均线)
             if (ai.confidence >= 95) {
                 console.log(`✨ [${symbol}] 触发 95% 圣光信号！无视规则强行开仓。`);
                 canGo = true; isJJ = true;
             } else {
-                // 常规判断
                 if (isLock) {
-                    if (ai.confidence >= 90) { // 90% 只能越狱，不能逆势
+                    if (ai.confidence >= 90) { 
                         const prev = c15[c15.length-2];
                         const cond = ai.direction==='LONG'?(curP>calcEMA(c15,9)&&curP>ema50_4h):(curP<calcEMA(c15,9)&&curP<ema50_4h);
                         if (cond) { canGo = true; isJJ = true; }
                     }
                 } else if (ai.confidence >= 60) {
-                    // 顺势检查
-                    if ((ai.direction==='LONG'&&curP>ema50_4h)||(ai.direction==='SHORT'&&curP<ema50_4h)) {
-                        canGo = true;
-                    }
+                    if ((ai.direction==='LONG'&&curP>ema50_4h)||(ai.direction==='SHORT'&&curP<ema50_4h)) canGo = true;
                 }
             }
 
             if (canGo) {
                 let budget = 0;
-                const reserve = 0.5 * snap.total; // 50% 预备队
-
-                if (ai.confidence >= 90) {
-                    budget = snap.available * 0.4; // 老大重仓
-                } else {
+                const reserve = 0.5 * snap.total; 
+                if (ai.confidence >= 90) budget = snap.available * 0.4; 
+                else {
                     let commonLeft = reserve - snap.used;
                     if (commonLeft <= 0) continue;
                     budget = Math.min(snap.available * (ai.confidence>=80?0.2:0.1), commonLeft);
@@ -199,7 +189,7 @@ async function runMonitor() {
 }
 
 // ==========================================
-// 📦 工具与网页 (同前)
+// 📦 工具与网页 
 // ==========================================
 async function fetchJSON(url) { return new Promise((resolve, reject) => { https.get(url, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(e); } }); }).on('error', reject); }); }
 async function postJSON(url, body, headers) { return new Promise((resolve, reject) => { const req = https.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, timeout: 25000 }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { resolve(d); } }); }); req.on('error', reject); req.write(JSON.stringify(body)); req.end(); }); }
@@ -209,7 +199,7 @@ function roundQty(symbol, qty) { let prec = QTY_PRECISION[symbol] || 3; return M
 
 async function askAI(symbol, d15, d4) {
     if (!DEEPSEEK_API_KEY) return { direction: 'WAIT' };
-    const prompt = `你是最高风控官。战场:[${symbol}]。数据:${JSON.stringify(d15)}。趋势:${JSON.stringify(d4)}。请根据共振分析，严格返回JSON:{"direction":"LONG/SHORT/WAIT","sl":止损价,"confidence":0-100,"reason":"理由"}`;
+    const prompt = `你是最高风控官。战场:[${symbol}]。数据:${JSON.stringify(d15)}。趋势:${JSON.stringify(d4)}。请根据共振分析，严格返回JSON:{"direction":"LONG/SHORT/WAIT","sl":止损价,"confidence":0-100,"reason":"简短理由"}`;
     try {
         const res = await postJSON("https://api.deepseek.com/chat/completions", { model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.1 }, { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` });
         return JSON.parse(res.choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
@@ -227,8 +217,18 @@ async function openOrder(symbol, dir, qty, sl, price, strategy, isJunjun) {
 
 http.createServer((req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end(`<h1>V10.0 飞书版监控</h1><h3>今日累计盈亏: ${inMemoryDB.totalPnl.toFixed(3)} U</h3><p>系统于 ${inMemoryDB.startTime} 启动</p>`);
+    res.end(`<h1>V10.1 飞书监控版</h1><h3>今日累计盈亏: ${inMemoryDB.totalPnl.toFixed(3)} U</h3><p>系统于 ${inMemoryDB.startTime} 启动</p>`);
 }).listen(process.env.PORT || 3000);
+
+// 🔥 V10.1 新增：飞书整点战报 (每小时自动汇报大局)
+setInterval(() => {
+    let msg = `💰 今日累计盈亏: ${inMemoryDB.totalPnl.toFixed(3)} U\n\n🎯 阵地状态:\n`;
+    SYMBOLS.forEach(s => {
+        let p = positions[s];
+        msg += `- ${s}: ${p.status === 'NONE' ? '空仓💤' : p.status + ' (持仓中)'}\n`;
+    });
+    sendFeishu("📊 战车整点巡视", msg);
+}, 60 * 60 * 1000);
 
 setInterval(runMonitor, CHECK_INTERVAL_MS);
 runMonitor();
