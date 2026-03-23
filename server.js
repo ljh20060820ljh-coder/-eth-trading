@@ -6,7 +6,7 @@ const querystring = require('querystring');
 // ==========================================
 // 🔐 核心配置区 (请填入你的飞书 Webhook)
 // ==========================================
-const FEISHU_WEBHOOK_URL = "这里填入你的飞书Webhook地址"; 
+const FEISHU_WEBHOOK_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/6099f609-41c4-4364-b0d8-fdb986b821a2 "; 
 
 const BINANCE_API_KEY = process.env.BINANCE_API_KEY;
 const BINANCE_API_SECRET = process.env.BINANCE_API_SECRET;
