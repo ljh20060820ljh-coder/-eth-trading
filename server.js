@@ -12,7 +12,7 @@ const BINANCE_API_KEY = process.env.BINANCE_API_KEY;
 const BINANCE_API_SECRET = process.env.BINANCE_API_SECRET;
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY; 
 
-// 🛡️ 物理参数 (V11.0 纯血量化版)
+// 🛡️ 物理参数 (V11.0 究极版)
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
 const PRICE_PRECISION = { 'BTCUSDT': 1, 'ETHUSDT': 2, 'SOLUSDT': 3 }; 
 const QTY_PRECISION = { 'BTCUSDT': 3, 'ETHUSDT': 3, 'SOLUSDT': 1 }; 
@@ -31,7 +31,7 @@ SYMBOLS.forEach(sym => {
 
 let inMemoryDB = { wins: 0, losses: 0, totalPnl: 0, startTime: new Date().toLocaleString() };
 
-console.log("🚀 V11.0 纯血量化版启动！三叉戟数学雷达已挂载，AI 政委已上线！");
+console.log("🚀 V11.0 究极完全体启动！三叉戟数学雷达已挂载，AI 政委已上线，特权豁免已开启！");
 
 // ==========================================
 // 📡 飞书推送引擎
@@ -44,7 +44,7 @@ async function sendFeishu(title, message) {
     const options = { hostname: url.hostname, path: url.pathname + url.search, method: 'POST', headers: { 'Content-Type': 'application/json' } };
     const req = https.request(options); req.write(data); req.end();
 }
-sendFeishu("📡 V11.0 终极点火", "长官，V11.0 已换装完毕！多因子共振开启，ATR动态防御就绪，开始狩猎狗庄！");
+sendFeishu("📡 V11.0 终极点火", "长官，V11.0 究极版已部署！逆势抄底特权已发放，准备在血海里捡筹码！");
 
 // ==========================================
 // 💸 币安核心执行模块
@@ -81,6 +81,7 @@ async function closePosition(symbol) {
     await binanceReq('/fapi/v1/order', { symbol, side, type: 'MARKET', quantity: p.qty });
     await binanceReq('/fapi/v1/allOpenOrders', { symbol }, 'DELETE'); // 撤销之前的止损止盈单
 }
+
 // ==========================================
 // 🧮 华尔街数学指标库 (三叉戟核心)
 // ==========================================
@@ -97,7 +98,7 @@ async function getFundingRate(symbol) {
     catch(e) { return 0; }
 }
 
-// 🧠 AI 政委终审 (结合数学雷达的判决)
+// 🧠 AI 政委终审
 async function askAI(symbol, mathDir, strategyName, d15) {
     if (!DEEPSEEK_API_KEY || mathDir === 'WAIT') return { direction: 'WAIT', confidence: 0, reason: '雷达无信号' };
     const prompt = `你是量化基金政委。底层数学雷达已触发【${strategyName}】信号，建议方向: ${mathDir}。当前标的:${symbol}。最近K线:${JSON.stringify(d15.slice(-5))}。
@@ -116,6 +117,7 @@ async function openOrder(symbol, dir, qty, sl, strategy) {
     await binanceReq('/fapi/v1/algoOrder', { algoType: 'CONDITIONAL', symbol, side: reverse, type: 'TRAILING_STOP_MARKET', callbackRate: '1.0', quantity: roundQty(symbol, qty), reduceOnly: 'true' });
     return true;
 }
+
 // ==========================================
 // 📊 V11.0 核心决策与监控循环
 // ==========================================
@@ -213,7 +215,7 @@ async function runMonitor() {
             const cur = c15[c15.length-1], prev = c15[c15.length-2];
             const rsi = calcRSI(c15);
             
-            // 策略A：背离狙击手 (简化版逻辑)
+            // 策略A：背离狙击手 (抄底/摸顶)
             if (rsi < 30 && cur.c < c15[c15.length-10].l) { mathDir = 'LONG'; stratName = '背离狙击手'; }
             else if (rsi > 70 && cur.c > c15[c15.length-10].h) { mathDir = 'SHORT'; stratName = '背离狙击手'; }
             
@@ -223,25 +225,33 @@ async function runMonitor() {
             if (pinbarLong) { mathDir = 'LONG'; stratName = '猎杀突击队'; }
             else if (pinbarShort) { mathDir = 'SHORT'; stratName = '猎杀突击队'; }
 
-            // 策略C：放量冲锋营
+            // 策略C：放量冲锋营 (趋势突破)
             const avgVol = c15.slice(-20).reduce((a,b)=>a+b.v,0)/20;
             if (cur.c > c15[c15.length-5].h && cur.v > avgVol * 3) { mathDir = 'LONG'; stratName = '放量冲锋营'; }
             else if (cur.c < c15[c15.length-5].l && cur.v > avgVol * 3) { mathDir = 'SHORT'; stratName = '放量冲锋营'; }
 
-            // 📉 过滤层：资金费率与大盘连坐与 4H 顺势
+            // 📉 过滤层：资金费率与大盘连坐与 4H 顺势 (特权豁免版)
             if (mathDir !== 'WAIT') {
-                const ema4h = calcEMA(r4h.map(d=>({c:+d[4]})), 50);
-                if ((mathDir === 'LONG' && curP < ema4h) || (mathDir === 'SHORT' && curP > ema4h)) {
-                    console.log(`⛔ [${symbol}] 雷达探测到 ${mathDir}，但逆 4H 大势，一票否决！`); mathDir = 'WAIT';
-                }
-                if (symbol !== 'BTCUSDT') {
-                    if ((mathDir === 'LONG' && btcTrend === 'BEAR') || (mathDir === 'SHORT' && btcTrend === 'BULL')) {
-                        console.log(`⛔ [${symbol}] 雷达逆 BTC 大盘情绪，一票否决！`); mathDir = 'WAIT';
-                    }
-                }
+                // 1. 资金费率极端情绪防守 (红线，均不豁免)
                 const fr = await getFundingRate(symbol);
                 if ((mathDir === 'LONG' && fr > 0.0005) || (mathDir === 'SHORT' && fr < -0.0005)) {
                     console.log(`⛔ [${symbol}] 资金费率极端 (${fr})，谨防杀散户陷阱，一票否决！`); mathDir = 'WAIT';
+                }
+
+                // 2. 宏观趋势过滤 (仅针对追单策略，反转策略豁免)
+                if (mathDir !== 'WAIT') {
+                    if (stratName === '放量冲锋营') {
+                        const ema4h = calcEMA(r4h.map(d=>({c:+d[4]})), 50);
+                        if ((mathDir === 'LONG' && curP < ema4h) || (mathDir === 'SHORT' && curP > ema4h)) {
+                            console.log(`⛔ [${symbol}] ${stratName} 逆 4H 大势，一票否决！`); mathDir = 'WAIT';
+                        } else if (symbol !== 'BTCUSDT') {
+                            if ((mathDir === 'LONG' && btcTrend === 'BEAR') || (mathDir === 'SHORT' && btcTrend === 'BULL')) {
+                                console.log(`⛔ [${symbol}] ${stratName} 逆 BTC 大盘情绪，一票否决！`); mathDir = 'WAIT';
+                            }
+                        }
+                    } else {
+                        console.log(`🛡️ [${symbol}] ${stratName} 属于反转特种部队，已自动豁免 4H 与大盘连坐限制！`);
+                    }
                 }
             }
 
@@ -289,7 +299,7 @@ async function runMonitor() {
 
 http.createServer((req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end(`<h1>V11.0 纯血量化版</h1><h3>今日累计盈亏: ${inMemoryDB.totalPnl.toFixed(3)} U</h3><p>三叉戟雷达与AI政委运作中</p><p>系统启动于 ${inMemoryDB.startTime}</p>`);
+    res.end(`<h1>V11.0 究极完全体</h1><h3>今日累计盈亏: ${inMemoryDB.totalPnl.toFixed(3)} U</h3><p>三叉戟雷达与AI政委运作中，反转特权已激活</p><p>系统启动于 ${inMemoryDB.startTime}</p>`);
 }).listen(process.env.PORT || 3000);
 
 // 🔥 整点战报 (每小时自动汇报大局)
