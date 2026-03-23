@@ -12,7 +12,7 @@ const BINANCE_API_KEY = process.env.BINANCE_API_KEY;
 const BINANCE_API_SECRET = process.env.BINANCE_API_SECRET;
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY; 
 
-// 🛡️ 物理参数 (V11.0 究极版)
+// 🛡️ 物理参数 (V11.2 动态军神版)
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
 const PRICE_PRECISION = { 'BTCUSDT': 1, 'ETHUSDT': 2, 'SOLUSDT': 3 }; 
 const QTY_PRECISION = { 'BTCUSDT': 3, 'ETHUSDT': 3, 'SOLUSDT': 1 }; 
@@ -31,7 +31,7 @@ SYMBOLS.forEach(sym => {
 
 let inMemoryDB = { wins: 0, losses: 0, totalPnl: 0, startTime: new Date().toLocaleString() };
 
-console.log("🚀 V11.0 究极完全体启动！三叉戟数学雷达已挂载，AI 政委已上线，特权豁免已开启！");
+console.log("🚀 V11.2 动态军神版启动！已加载分级动态风控系统！");
 
 // ==========================================
 // 📡 飞书推送引擎
@@ -44,7 +44,7 @@ async function sendFeishu(title, message) {
     const options = { hostname: url.hostname, path: url.pathname + url.search, method: 'POST', headers: { 'Content-Type': 'application/json' } };
     const req = https.request(options); req.write(data); req.end();
 }
-sendFeishu("📡 V11.0 终极点火", "长官，V11.0 究极版已部署！逆势抄底特权已发放，准备在血海里捡筹码！");
+sendFeishu("📡 V11.2 终极点火", "长官，V11.2 动态军神版已部署！已开启【看碟下菜】模式：信心越高容错越大，信心越低跑得越快！");
 
 // ==========================================
 // 💸 币安核心执行模块
@@ -109,17 +109,18 @@ async function askAI(symbol, mathDir, strategyName, d15) {
     } catch (e) { return { direction: 'WAIT', confidence: 0, reason: 'AI网络波动' }; }
 }
 
-async function openOrder(symbol, dir, qty, sl, strategy) {
+// 🔧 V11.2 修改：加入动态 callbackRate (cbRate)
+async function openOrder(symbol, dir, qty, sl, strategy, cbRate) {
     const side = dir === 'LONG' ? 'BUY' : 'SELL', reverse = dir === 'LONG' ? 'SELL' : 'BUY';
     const res = await binanceReq('/fapi/v1/order', { symbol, side, type: 'MARKET', quantity: roundQty(symbol, qty) });
     if (res && res.code) return false;
     await binanceReq('/fapi/v1/algoOrder', { algoType: 'CONDITIONAL', symbol, side: reverse, type: 'STOP_MARKET', triggerPrice: parseFloat(sl).toFixed(PRICE_PRECISION[symbol]||2), quantity: roundQty(symbol, qty), reduceOnly: 'true' });
-    await binanceReq('/fapi/v1/algoOrder', { algoType: 'CONDITIONAL', symbol, side: reverse, type: 'TRAILING_STOP_MARKET', callbackRate: '1.0', quantity: roundQty(symbol, qty), reduceOnly: 'true' });
+    await binanceReq('/fapi/v1/algoOrder', { algoType: 'CONDITIONAL', symbol, side: reverse, type: 'TRAILING_STOP_MARKET', callbackRate: cbRate, quantity: roundQty(symbol, qty), reduceOnly: 'true' });
     return true;
 }
 
 // ==========================================
-// 📊 V11.0 核心决策与监控循环
+// 📊 V11.2 核心决策与监控循环
 // ==========================================
 async function syncPositions() {
     const risk = await binanceReq('/fapi/v2/positionRisk', {}, 'GET');
@@ -185,8 +186,8 @@ async function runMonitor() {
                     await closePosition(symbol); continue;
                 }
                 
-                // 1.5% 触发保本护城河 (物理兜底)
-                if (mfe >= 1.5 && !p.breakevenSet) {
+                // 2.5% 触发保本护城河
+                if (mfe >= 2.5 && !p.breakevenSet) {
                     p.breakevenSet = true;
                     sendFeishu("🏰 护城河建立", `[${symbol}] 浮盈达 ${mfe.toFixed(2)}%。已开启无敌保本模式！`);
                 }
@@ -214,10 +215,11 @@ async function runMonitor() {
             let mathDir = 'WAIT', stratName = '';
             const cur = c15[c15.length-1], prev = c15[c15.length-2];
             const rsi = calcRSI(c15);
+            const avgVol = c15.slice(-20).reduce((a,b)=>a+b.v,0)/20;
             
-            // 策略A：背离狙击手 (抄底/摸顶)
-            if (rsi < 30 && cur.c < c15[c15.length-10].l) { mathDir = 'LONG'; stratName = '背离狙击手'; }
-            else if (rsi > 70 && cur.c > c15[c15.length-10].h) { mathDir = 'SHORT'; stratName = '背离狙击手'; }
+            // 策略A：背离狙击手 (放量确认)
+            if (rsi < 30 && cur.c < c15[c15.length-10].l && cur.v > avgVol) { mathDir = 'LONG'; stratName = '背离狙击手'; }
+            else if (rsi > 70 && cur.c > c15[c15.length-10].h && cur.v > avgVol) { mathDir = 'SHORT'; stratName = '背离狙击手'; }
             
             // 策略B：猎杀突击队 (SMC 假突破针)
             const pinbarLong = (prev.c - prev.l)/(prev.h - prev.l || 1) > 0.65 && cur.c > prev.c;
@@ -226,19 +228,16 @@ async function runMonitor() {
             else if (pinbarShort) { mathDir = 'SHORT'; stratName = '猎杀突击队'; }
 
             // 策略C：放量冲锋营 (趋势突破)
-            const avgVol = c15.slice(-20).reduce((a,b)=>a+b.v,0)/20;
             if (cur.c > c15[c15.length-5].h && cur.v > avgVol * 3) { mathDir = 'LONG'; stratName = '放量冲锋营'; }
             else if (cur.c < c15[c15.length-5].l && cur.v > avgVol * 3) { mathDir = 'SHORT'; stratName = '放量冲锋营'; }
 
             // 📉 过滤层：资金费率与大盘连坐与 4H 顺势 (特权豁免版)
             if (mathDir !== 'WAIT') {
-                // 1. 资金费率极端情绪防守 (红线，均不豁免)
                 const fr = await getFundingRate(symbol);
                 if ((mathDir === 'LONG' && fr > 0.0005) || (mathDir === 'SHORT' && fr < -0.0005)) {
                     console.log(`⛔ [${symbol}] 资金费率极端 (${fr})，谨防杀散户陷阱，一票否决！`); mathDir = 'WAIT';
                 }
 
-                // 2. 宏观趋势过滤 (仅针对追单策略，反转策略豁免)
                 if (mathDir !== 'WAIT') {
                     if (stratName === '放量冲锋营') {
                         const ema4h = calcEMA(r4h.map(d=>({c:+d[4]})), 50);
@@ -264,25 +263,44 @@ async function runMonitor() {
             const ai = await askAI(symbol, mathDir, stratName, c15);
             console.log(`🧠 [${symbol}] 政委裁决: ${ai.direction} | 信心: ${ai.confidence}% | 理由: ${ai.reason}`);
 
-            // 🔫 开火与透视镜逻辑
+            // 🔫 动态军神开火系统：信心越高，容错越大，咬得越死！
             if (ai.direction === mathDir) {
                 if (ai.confidence >= 70) {
                     let budget = snap.available * (ai.confidence >= 90 ? 0.3 : 0.15);
                     if (snap.total * 0.5 - snap.used < budget) budget = Math.max(0, snap.total * 0.5 - snap.used);
                     
                     let q = roundQty(symbol, (budget * LEVERAGE) / curP);
-                    if (q * curP < 6) q = roundQty(symbol, 6.5/curP); // 满足币安最低 5U 要求
+                    if (q * curP < 6) q = roundQty(symbol, 6.5/curP); 
                     
-                    let slPrice = mathDir === 'LONG' ? curP - (1.5 * atr) : curP + (1.5 * atr);
+                    // ✨ 核心灵魂：根据信心动态调整参数
+                    let atrMulti = 2.0;
+                    let cbRate = '1.0';
+                    let tactic = '常规作战';
+
+                    if (ai.confidence >= 90) {
+                        atrMulti = 3.0; // 极高把握：放宽止损死拿，防止洗盘
+                        cbRate = '2.0'; // 止盈回调放大，吃超级大波段
+                        tactic = '绝杀重仓';
+                    } else if (ai.confidence >= 80) {
+                        atrMulti = 2.0; // 中高把握：标准防守
+                        cbRate = '1.0'; // 标准追踪止盈
+                        tactic = '主力突击';
+                    } else {
+                        atrMulti = 1.2; // 勉强及格：游击战，止损极紧
+                        cbRate = '0.5'; // 回调 0.5% 直接落袋为安，打一枪就跑
+                        tactic = '游击试探';
+                    }
+
+                    let slPrice = mathDir === 'LONG' ? curP - (atrMulti * atr) : curP + (atrMulti * atr);
                     let requiredMargin = (q * curP / LEVERAGE);
 
-                    console.log(`🔫 [${symbol}] 扳机解锁！准备开仓: 兵力=${q}, 需保证金=${requiredMargin.toFixed(2)}U, 余额=${snap.available.toFixed(2)}U`);
+                    console.log(`🔫 [${symbol}] ${tactic}解锁！信心=${ai.confidence}%, 兵力=${q}, 需=${requiredMargin.toFixed(2)}U`);
 
                     if (snap.available >= requiredMargin) {
-                        const ok = await openOrder(symbol, mathDir, q, slPrice, stratName);
+                        const ok = await openOrder(symbol, mathDir, q, slPrice, stratName, cbRate);
                         if (ok) {
                             p.strategy = stratName; p.entryTime = now;
-                            sendFeishu(`🚀 ${stratName} 出击`, `[${symbol}] 已开仓！\n方向: ${mathDir}\n信心: ${ai.confidence}%\n兵力: ${q}\n动态止损: ${slPrice.toFixed(PRICE_PRECISION[symbol]||2)}\n政委批示: ${ai.reason}`);
+                            sendFeishu(`🚀 ${stratName} 出击 (${tactic})`, `[${symbol}] 已开仓！\n方向: ${mathDir}\n信心: ${ai.confidence}%\n兵力: ${q}\n动态防线: ${atrMulti}倍ATR (${slPrice.toFixed(PRICE_PRECISION[symbol]||2)})\n追踪回调: ${cbRate}%\n政委批示: ${ai.reason}`);
                         } else {
                             console.log(`❌ [${symbol}] 币安物理拒单！原因: 可能是兵力低于底线，或接口限制。`);
                         }
@@ -299,14 +317,14 @@ async function runMonitor() {
 
 http.createServer((req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end(`<h1>V11.0 究极完全体</h1><h3>今日累计盈亏: ${inMemoryDB.totalPnl.toFixed(3)} U</h3><p>三叉戟雷达与AI政委运作中，反转特权已激活</p><p>系统启动于 ${inMemoryDB.startTime}</p>`);
+    res.end(`<h1>V11.2 动态军神版</h1><h3>今日累计盈亏: ${inMemoryDB.totalPnl.toFixed(3)} U</h3><p>三叉戟雷达与AI政委运作中，分级风控已开启</p><p>系统启动于 ${inMemoryDB.startTime}</p>`);
 }).listen(process.env.PORT || 3000);
 
 // 🔥 整点战报 (每小时自动汇报大局)
 setInterval(() => {
     let msg = `💰 今日累计盈亏: ${inMemoryDB.totalPnl.toFixed(3)} U\n\n🎯 阵地状态:\n`;
     SYMBOLS.forEach(s => { let p = positions[s]; msg += `- ${s}: ${p.status === 'NONE' ? '空仓💤' : p.status + ' ('+p.strategy+')'}\n`; });
-    sendFeishu("📊 V11.0 军情总览", msg);
+    sendFeishu("📊 V11.2 军情总览", msg);
 }, 60 * 60 * 1000);
 
 setInterval(runMonitor, CHECK_INTERVAL_MS);
