@@ -254,22 +254,33 @@ async function runMonitor() {
             const ai = await askAI(symbol, mathDir, stratName, c15);
             console.log(`🧠 [${symbol}] 政委裁决: ${ai.direction} | 信心: ${ai.confidence}% | 理由: ${ai.reason}`);
 
-            if (ai.direction === mathDir && ai.confidence >= 70) {
-                // 🧮 凯利资金分配与 ATR 止损
-                let budget = snap.available * (ai.confidence >= 90 ? 0.3 : 0.15);
-                if (snap.total * 0.5 - snap.used < budget) budget = Math.max(0, snap.total * 0.5 - snap.used);
-                
-                let q = roundQty(symbol, (budget * LEVERAGE) / curP);
-                if (q * curP < 6) q = roundQty(symbol, 6.5/curP); // 满足币安最低 5U 要求
-                
-                let slPrice = mathDir === 'LONG' ? curP - (1.5 * atr) : curP + (1.5 * atr);
+            // 🔫 开火与透视镜逻辑
+            if (ai.direction === mathDir) {
+                if (ai.confidence >= 70) {
+                    let budget = snap.available * (ai.confidence >= 90 ? 0.3 : 0.15);
+                    if (snap.total * 0.5 - snap.used < budget) budget = Math.max(0, snap.total * 0.5 - snap.used);
+                    
+                    let q = roundQty(symbol, (budget * LEVERAGE) / curP);
+                    if (q * curP < 6) q = roundQty(symbol, 6.5/curP); // 满足币安最低 5U 要求
+                    
+                    let slPrice = mathDir === 'LONG' ? curP - (1.5 * atr) : curP + (1.5 * atr);
+                    let requiredMargin = (q * curP / LEVERAGE);
 
-                if (snap.available >= (q * curP / LEVERAGE)) {
-                    const ok = await openOrder(symbol, mathDir, q, slPrice, stratName);
-                    if (ok) {
-                        p.strategy = stratName; p.entryTime = now;
-                        sendFeishu(`🚀 ${stratName} 出击`, `[${symbol}] 已开仓！\n方向: ${mathDir}\n信心: ${ai.confidence}%\n兵力: ${q}\n动态止损: ${slPrice.toFixed(PRICE_PRECISION[symbol]||2)}\n政委批示: ${ai.reason}`);
+                    console.log(`🔫 [${symbol}] 扳机解锁！准备开仓: 兵力=${q}, 需保证金=${requiredMargin.toFixed(2)}U, 余额=${snap.available.toFixed(2)}U`);
+
+                    if (snap.available >= requiredMargin) {
+                        const ok = await openOrder(symbol, mathDir, q, slPrice, stratName);
+                        if (ok) {
+                            p.strategy = stratName; p.entryTime = now;
+                            sendFeishu(`🚀 ${stratName} 出击`, `[${symbol}] 已开仓！\n方向: ${mathDir}\n信心: ${ai.confidence}%\n兵力: ${q}\n动态止损: ${slPrice.toFixed(PRICE_PRECISION[symbol]||2)}\n政委批示: ${ai.reason}`);
+                        } else {
+                            console.log(`❌ [${symbol}] 币安物理拒单！原因: 可能是兵力低于底线，或接口限制。`);
+                        }
+                    } else {
+                        console.log(`⚠️ [${symbol}] 弹药不足拦截！需 ${requiredMargin.toFixed(2)}U，但预备队仅剩 ${snap.available.toFixed(2)}U`);
                     }
+                } else {
+                    console.log(`🔒 [${symbol}] 信心 ${ai.confidence}% 未达标(需70%)，风控强行锁死扳机！`);
                 }
             }
         }
