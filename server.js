@@ -1,26 +1,29 @@
-
 const https = require('https');
 const http = require('http');
 const crypto = require('crypto');
 const querystring = require('querystring');
 
 // ==========================================
-// 🔐 核心配置区 (V12.0 纯血极简版)
+// 🔐 核心配置区 (V12.0 终极满血版)
 // ==========================================
-// 换成你自己的飞书 Webhook 地址
 const FEISHU_WEBHOOK_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/6099f609-41c4-4364-b0d8-fdb986b821a2"; 
 
 const BINANCE_API_KEY = process.env.BINANCE_API_KEY;
 const BINANCE_API_SECRET = process.env.BINANCE_API_SECRET;
-// ⚠️ 注意：DeepSeek 的 Key 已经被彻底物理开除，无需配置！
 
-// 🛡️ 战车物理参数
-const SYMBOLS = ['SOLUSDT', 'ETHUSDT']; // 主战标的 (BTC作为大盘单独看)
-const PRICE_PRECISION = { 'BTCUSDT': 1, 'ETHUSDT': 2, 'SOLUSDT': 3 }; 
-const QTY_PRECISION = { 'BTCUSDT': 3, 'ETHUSDT': 3, 'SOLUSDT': 1 }; 
+// 🛡️ 战车物理参数 (扩编 10 人精锐突击队)
+const SYMBOLS = [
+    'SOLUSDT', 'ETHUSDT', 'DOGEUSDT', 'BNBUSDT', 
+    'XRPUSDT', 'AVAXUSDT', 'ADAUSDT', 'LINKUSDT', 
+    'ORDIUSDT', 'INJUSDT'
+]; 
+// 精度字典 (保障 API 下单不报错)
+const PRICE_PRECISION = { 'BTCUSDT': 1, 'ETHUSDT': 2, 'SOLUSDT': 3, 'DOGEUSDT': 5, 'BNBUSDT': 2, 'XRPUSDT': 4, 'AVAXUSDT': 3, 'ADAUSDT': 4, 'LINKUSDT': 3, 'ORDIUSDT': 3, 'INJUSDT': 3 }; 
+const QTY_PRECISION = { 'BTCUSDT': 3, 'ETHUSDT': 3, 'SOLUSDT': 1, 'DOGEUSDT': 0, 'BNBUSDT': 2, 'XRPUSDT': 1, 'AVAXUSDT': 1, 'ADAUSDT': 0, 'LINKUSDT': 2, 'ORDIUSDT': 1, 'INJUSDT': 1 }; 
+
 const LEVERAGE = 20;
 const POSITION_RISK_PERCENT = 0.25; // 每次开火抽调 25% 的本金
-const CHECK_INTERVAL_MS = 2 * 60 * 1000; // 每2分钟巡逻一次
+const CHECK_INTERVAL_MS = 2 * 60 * 1000; // 每 2 分钟巡逻一次
 
 // 🎯 状态管理
 let positions = {};
@@ -29,7 +32,7 @@ SYMBOLS.forEach(sym => {
 });
 let inMemoryDB = { wins: 0, losses: 0, totalPnl: 0, startTime: new Date().toLocaleString() };
 
-console.log("🚀 V12.0 终极纯血战车启动！[30m主炮 + BTC大盘连坐 + ADX测风仪] 已装填完毕！");
+console.log("🚀 V12.0 终极全矩阵战车启动！[10币并发 + 30m主炮 + BTC大盘连坐 + ADX(18)微风起飞]！");
 
 // ==========================================
 // 📡 飞书军用面板引擎
@@ -42,7 +45,7 @@ async function sendFeishu(title, message) {
     const options = { hostname: url.hostname, path: url.pathname + url.search, method: 'POST', headers: { 'Content-Type': 'application/json' } };
     const req = https.request(options); req.write(data); req.end();
 }
-sendFeishu("⚡ V12.0 点火确认", "长官！AI政委已被物理清除。当前战术: 30m快枪手 + 大盘连坐 + 测风仪。完全机械化收割准备就绪！");
+sendFeishu("⚡ V12.0 终极扩军点火", "长官！雷达已扩容至 10 大妖币！ADX 风力限制已放宽至 18！战车彻底解除封印，准备微风起飞！");
 
 // ==========================================
 // 💸 币安核心执行模块
@@ -73,8 +76,9 @@ async function getWallet() {
 }
 
 function roundQty(symbol, qty) { let prec = QTY_PRECISION[symbol] || 3; return Math.max(parseFloat(parseFloat(qty).toFixed(prec)), Math.pow(10, -prec)); }
+
 // ==========================================
-// 🧮 华尔街纯血数学库 (拒绝玄学)
+// 🧮 华尔街纯血数学库 (纯净版)
 // ==========================================
 async function fetchKlines(symbol, interval = '30m', limit = 100) {
     return new Promise((resolve) => {
@@ -149,6 +153,7 @@ function calcADX(klines, period = 14) {
     for(let i=period; i<dx.length; i++) adx = (adx * 13 + dx[i]) / period;
     return adx; // 返回当前风力值
 }
+
 // ==========================================
 // 📊 终极作战指挥中枢
 // ==========================================
@@ -229,9 +234,9 @@ async function runMonitor() {
             // ==========================================
             // ⚔️ 状态二：空仓埋伏与开火判定
             // ==========================================
-            // 锁一：测风仪 (ADX < 20 绝对静默，防震荡磨损)
-            if (curWindForce < 20) {
-                console.log(`💤 [${symbol}] 测风仪警报: 风力仅 ${curWindForce.toFixed(1)}。无风不起浪，死水行情休眠中...`);
+            // 锁一：测风仪 (ADX < 18 绝对静默，已放宽限制允许微风起飞)
+            if (curWindForce < 18) {
+                console.log(`💤 [${symbol}] 测风仪警报: 风力仅 ${curWindForce.toFixed(1)}。低于18，死水休眠中...`);
                 continue;
             }
 
@@ -247,10 +252,10 @@ async function runMonitor() {
 
             // 锁三：大都督连坐审核 (顺应大饼趋势)
             if (signal === 'LONG' && btcTrend !== 'LONG') {
-                console.log(`⛔ [${symbol}] 驳回！主炮想做多，但 BTC 正在暴跌 (SHORT)。禁止逆势！`); continue;
+                console.log(`⛔ [${symbol}] 驳回！主炮做多，但 BTC 暴跌中。禁止逆势！`); continue;
             }
             if (signal === 'SHORT' && btcTrend !== 'SHORT') {
-                console.log(`⛔ [${symbol}] 驳回！主炮想做空，但 BTC 正在暴涨 (LONG)。禁止逆势！`); continue;
+                console.log(`⛔ [${symbol}] 驳回！主炮做空，但 BTC 暴涨中。禁止逆势！`); continue;
             }
 
             // 🔫 三锁全开！物理级开火！
@@ -267,12 +272,12 @@ async function runMonitor() {
             
             if (!res.code) {
                 p.status = signal; p.entryPrice = curPrice; p.qty = qty; p.superTrendLine = curK.stLine;
-                // 追加一个 1.5% 的追踪止盈，防止深V画门利润回吐
+                // 追加 1.5% 追踪止盈
                 const revSide = signal === 'LONG' ? 'SELL' : 'BUY';
                 await binanceReq('/fapi/v1/algoOrder', { algoType: 'CONDITIONAL', symbol, side: revSide, type: 'TRAILING_STOP_MARKET', callbackRate: '1.5', quantity: qty, reduceOnly: 'true' });
                 
-                sendFeishu(`🎯 军神战报 | V12.0 纯血开火`, 
-                    `标的: ${symbol} (30m级别)\n方向: ${signal === 'LONG' ? '🟢 多头突击' : '🔴 空头碾压'}\n大盘共振: ${btcTrend} 允许放行\n测风仪: ADX=${curWindForce.toFixed(1)} (风力强劲)\n兵力: 25% 仓位 (约 ${requiredMargin.toFixed(2)}U)\n开仓价: ${curPrice}\n钢铁防线: ${p.superTrendLine.toFixed(PRICE_PRECISION[symbol]||2)} (动态同轨止损)`
+                sendFeishu(`🎯 军神战报 | V12.0 满血开火`, 
+                    `标的: ${symbol} (30m级别)\n方向: ${signal === 'LONG' ? '🟢 多头突击' : '🔴 空头碾压'}\n大盘共振: ${btcTrend} 允许放行\n测风仪: ADX=${curWindForce.toFixed(1)} (微风起飞)\n兵力: 25% 仓位 (约 ${requiredMargin.toFixed(2)}U)\n开仓价: ${curPrice}\n钢铁防线: ${p.superTrendLine.toFixed(PRICE_PRECISION[symbol]||2)} (动态同轨止损)`
                 );
             }
         }
@@ -282,15 +287,23 @@ async function runMonitor() {
 // 🌐 战报网页
 http.createServer((req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end(`<h1>V12.0 终极纯血军神</h1><h3>无 AI，纯数学 | 30m 快枪手 + 大盘连坐 + ADX测风</h3><p>今日累计预估盈亏: ${inMemoryDB.totalPnl.toFixed(3)} U</p><p>启动时间: ${inMemoryDB.startTime}</p>`);
+    res.end(`<h1>V12.0 终极全矩阵军神</h1><h3>10币并发 | 30m快枪手 + 大盘连坐 + ADX(18)微风起飞</h3><p>今日累计预估盈亏: ${inMemoryDB.totalPnl.toFixed(3)} U</p><p>启动时间: ${inMemoryDB.startTime}</p>`);
 }).listen(process.env.PORT || 3000);
 
 // 定时播报
 setInterval(() => {
     let msg = `💰 今日累计盈亏: ${inMemoryDB.totalPnl.toFixed(3)} U\n🎯 阵地状态:\n`;
-    SYMBOLS.forEach(s => { let p = positions[s]; msg += `- ${s}: ${p.status === 'NONE' ? '休眠💤' : p.status + ' | 防线: ' + p.superTrendLine.toFixed(PRICE_PRECISION[s]||2)}\n`; });
+    let activePos = false;
+    SYMBOLS.forEach(s => { 
+        let p = positions[s]; 
+        if (p.status !== 'NONE') {
+            msg += `- ${s}: ${p.status} | 防线: ${p.superTrendLine.toFixed(PRICE_PRECISION[s]||2)}\n`; 
+            activePos = true;
+        }
+    });
+    if (!activePos) msg += `- 全军休眠/瞄准中 💤\n`;
     sendFeishu("📊 V12.0 战区巡航", msg);
-}, 2 * 60 * 60 * 1000); // 纯血版很稳，每2小时发一次报平安即可
+}, 2 * 60 * 60 * 1000); // 每2小时发一次报平安
 
 setInterval(runMonitor, CHECK_INTERVAL_MS);
 runMonitor();
