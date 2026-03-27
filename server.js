@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const querystring = require('querystring');
 
 // ==========================================
-// 🔐 核心配置区 (V12.4 全功率播报版)
+// 🔐 核心配置区 (V12.5 全景雷达版)
 // ==========================================
 const FEISHU_WEBHOOK_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/6099f609-41c4-4364-b0d8-fdb986b821a2"; 
 
@@ -38,7 +38,7 @@ let initialBalance = null; // 记录开机时的真实钱包余额
 let currentBalance = 0;    // 当前真实钱包余额
 let startTimeBJ = getBJTime();
 
-console.log(`🚀 V12.4 全功率版启动！[已开启底层监控刷屏 + 网页查岗雷达]`);
+console.log(`🚀 V12.5 全景雷达版启动！[已开启底层满负荷扫描播报]`);
 
 // ==========================================
 // 📡 飞书军用面板引擎
@@ -52,7 +52,7 @@ async function sendFeishu(title, message) {
     const req = https.request(options); req.write(data); req.end();
 }
 
-sendFeishu("⚡ V12.4 战车重新部署", "长官！系统已升级至 V12.4！已恢复 Render 底层控制台【每2分钟实时播报】功能，并加装【网页查岗探测器】！");
+sendFeishu("⚡ V12.5 战车重新部署", "长官！系统已升级至 V12.5 全景雷达版！测风仪已全功率开启，正在为您进行全天候无死角扫盘！");
 
 async function binanceReq(path, params, method = 'POST') {
     params.timestamp = Date.now();
@@ -176,9 +176,9 @@ async function runMonitor() {
         await checkPositions();
         const snap = await getWallet();
         
-        // 💰 真实资金核算逻辑 (包含手续费和资金费率)
+        // 💰 真实资金核算逻辑
         if (initialBalance === null && snap.total > 0) {
-            initialBalance = snap.total; // 记录开机时的真实本金
+            initialBalance = snap.total; 
         }
         currentBalance = snap.total;
 
@@ -232,7 +232,6 @@ async function runMonitor() {
                     sendFeishu(`🩸 战车强制收网 [${symbol}]`, `平仓原因: ${closeReason}\n最高浮盈曾达: ${p.maxMfe.toFixed(2)}%\n请等待1分钟后查看账户真实余额变化！`);
                     p.status = 'NONE'; p.maxMfe = 0; p.dynamicStopPrice = 0;
                 } else {
-                    // 指挥官强迫症专属：每2分钟在黑板上打印一次各防线细节！
                     let lockStr = p.dynamicStopPrice ? ` | 锁润线:${p.dynamicStopPrice.toFixed(PRICE_PRECISION[symbol]||2)}` : '';
                     console.log(`🛡️ [${symbol}] 持仓中 | 现价:${curPrice} | ROE:${roe.toFixed(2)}%${lockStr}`);
                 }
@@ -240,8 +239,13 @@ async function runMonitor() {
             }
 
             // ==========================================
-            // ⚔️ 状态二：空仓埋伏与开火判定
+            // ⚔️ 状态二：空仓埋伏与开火判定 (含雷达扫描)
             // ==========================================
+            
+            // 指挥官专属：空仓测风仪雷达，每2分钟疯狂刷屏！
+            let trendIcon = currentTrend === 'LONG' ? '🟢多' : '🔴空';
+            console.log(`💤 雷达扫描 [${symbol}] | 现价:${curPrice} | 趋势:${trendIcon} | 风力(ADX):${curWindForce.toFixed(2)}`);
+
             if (curWindForce < 18) { continue; }
 
             let signal = 'WAIT';
@@ -264,11 +268,10 @@ async function runMonitor() {
             if (!res.code) {
                 p.status = signal; p.entryPrice = curPrice; p.qty = qty; 
                 
-                // ⚠️ 底层物理防线：已放宽至 3.0% (防震荡洗盘)
                 const revSide = signal === 'LONG' ? 'SELL' : 'BUY';
                 await binanceReq('/fapi/v1/algoOrder', { algoType: 'CONDITIONAL', symbol, side: revSide, type: 'TRAILING_STOP_MARKET', callbackRate: '3.0', quantity: qty, reduceOnly: 'true' });
                 
-                sendFeishu(`🎯 军神战报 | V12.4 棘轮开火`, 
+                sendFeishu(`🎯 军神战报 | V12.5 棘轮开火`, 
                     `标的: ${symbol}\n方向: ${signal === 'LONG' ? '🟢 做多' : '🔴 做空'}\n投入: 约 ${requiredMargin.toFixed(2)}U\n开仓价: ${curPrice}\n防线: 3.0%底层追踪止损 + 云端棘轮锁润！`
                 );
             }
@@ -277,15 +280,14 @@ async function runMonitor() {
 }
 
 http.createServer((req, res) => {
-    // 指挥官查岗雷达！
-    console.log(`🌐 收到最高指挥官的网络查岗访问！(网页被点击)`);
+    console.log(`🌐 收到最高指挥官或外挂哨兵的访问查岗！`);
     
     let realPnl = initialBalance !== null ? (currentBalance - initialBalance) : 0;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end(`<h1>V12.4 棘轮锁润军神</h1><h3>10币并发 | 变色斩首 + 棘轮锁润 + 全功率播报</h3><p>本次开机净利润: ${realPnl.toFixed(3)} U</p><p>启动时间(北京): ${startTimeBJ}</p>`);
+    res.end(`<h1>V12.5 全景雷达版战车</h1><h3>10币并发 | 变色斩首 + 棘轮锁润 + 全景测风雷达</h3><p>本次开机净利润: ${realPnl.toFixed(3)} U</p><p>启动时间(北京): ${startTimeBJ}</p>`);
 }).listen(process.env.PORT || 3000);
 
-// ⏰ 定时战报频率已改为：1小时 (1 * 60 * 60 * 1000)
+// ⏰ 定时战报频率：1小时
 setInterval(() => {
     let realPnl = initialBalance !== null ? (currentBalance - initialBalance) : 0;
     let msg = `💰 开机至今净利润: ${realPnl.toFixed(3)} U (已扣手续费)\n🎯 阵地状态:\n`;
@@ -299,10 +301,8 @@ setInterval(() => {
     });
     if (!activePos) msg += `- 全军休眠/瞄准中 💤\n`;
     
-    // 提醒：Render 重启会导致本金基数重置
     msg += `\n(注: 若服务器打盹重启，净利润将以最新余额重新起算)`;
-    
-    sendFeishu("📊 V12.4 战区巡航 (每小时播报)", msg);
+    sendFeishu("📊 V12.5 战区巡航 (每小时播报)", msg);
 }, 1 * 60 * 60 * 1000); 
 
 setInterval(runMonitor, CHECK_INTERVAL_MS);
