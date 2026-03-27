@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const querystring = require('querystring');
 
 // ==========================================
-// 🔐 核心配置区 (V12.6 大饼独裁终极版)
+// 🔐 核心配置区 (V12.7 猎鹰出击版)
 // ==========================================
 const FEISHU_WEBHOOK_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/6099f609-41c4-4364-b0d8-fdb986b821a2"; 
 
@@ -34,7 +34,7 @@ let initialBalance = null;
 let currentBalance = 0;    
 let startTimeBJ = getBJTime();
 
-console.log(`🚀 V12.6 大饼独裁终极版启动！[已加入BTC大盘共振过滤 + 失联防爆盾]`);
+console.log(`🚀 V12.7 猎鹰出击版启动！[已加入降维打击 + 半路上车机制]`);
 
 async function sendFeishu(title, message) {
     if (!FEISHU_WEBHOOK_URL || FEISHU_WEBHOOK_URL.includes("这里填入")) return;
@@ -45,7 +45,7 @@ async function sendFeishu(title, message) {
     const req = https.request(options); req.write(data); req.end();
 }
 
-sendFeishu("⚡ V12.6 战车重新部署", "长官！系统已升级至 V12.6 终极版！【BTC趋势共振过滤】及【断网失联预案】已全功率上线，彻底封死逆势画门陷阱！");
+sendFeishu("⚡ V12.7 战车重新部署", "长官！系统已升级至 V12.7 猎鹰出击版！已放宽交战权限：起风门槛降至12，狂风(>25)允许半路截杀！准备大开杀戒！");
 
 async function binanceReq(path, params, method = 'POST') {
     params.timestamp = Date.now();
@@ -175,14 +175,13 @@ async function runMonitor() {
         // 👑 【最高优先级】请示 BTC 大饼哥的脸色
         let btcKlines = await fetchKlines('BTCUSDT', '30m', 150);
         
-        // [断网防线] 如果没联系上大饼哥，或者数据不够，直接全军静默防爆！
         if (!btcKlines || btcKlines.length < 50) {
              console.log(`⚠️ [大盘风控局] 呼叫BTC大哥失败(网络波动)，全军原地静默，暂不执行新开火！`);
              return; 
         }
         
         btcKlines = calcSuperTrend(btcKlines);
-        const btcTrend = btcKlines[btcKlines.length - 1].trend; // 获取大饼当前的趋势
+        const btcTrend = btcKlines[btcKlines.length - 1].trend; 
         console.log(`\n👑 [大盘风控局] BTC大哥当前脸色: ${btcTrend === 'LONG' ? '🟢 多头主导' : '🔴 空头主导'}`);
 
         for (const symbol of SYMBOLS) {
@@ -199,7 +198,7 @@ async function runMonitor() {
             const currentTrend = curK.trend;
 
             // ==========================================
-            // 🛡️ 状态一：持仓防守与收网 (平仓逃命不需要问老大)
+            // 🛡️ 状态一：持仓防守与收网 (防线不降级)
             // ==========================================
             if (p.status !== 'NONE') {
                 let roe = p.status === 'LONG' ? (curPrice - p.entryPrice)/p.entryPrice*100 * LEVERAGE : (p.entryPrice - curPrice)/p.entryPrice*100 * LEVERAGE;
@@ -240,24 +239,33 @@ async function runMonitor() {
             }
 
             // ==========================================
-            // ⚔️ 状态二：空仓埋伏与开火判定
+            // ⚔️ 状态二：空仓埋伏与【猎鹰出击】判定
             // ==========================================
             let trendIcon = currentTrend === 'LONG' ? '🟢多' : '🔴空';
             console.log(`💤 雷达扫描 [${symbol}] | 现价:${curPrice} | 趋势:${trendIcon} | 风力(ADX):${curWindForce.toFixed(2)}`);
 
-            if (curWindForce < 18) { continue; }
+            // [修改1] 基础风力门槛从 18 降至 12，鱼头吃得更早！
+            if (curWindForce < 12) { continue; }
 
             let signal = 'WAIT';
-            if (prevK.trend === 'SHORT' && currentTrend === 'LONG') signal = 'LONG';
-            if (prevK.trend === 'LONG' && currentTrend === 'SHORT') signal = 'SHORT';
+            let signalReason = '';
+
+            // 规则 A：抓变色瞬间 (最完美的突破点)
+            if (prevK.trend === 'SHORT' && currentTrend === 'LONG') { signal = 'LONG'; signalReason = '底部翻绿突破'; }
+            if (prevK.trend === 'LONG' && currentTrend === 'SHORT') { signal = 'SHORT'; signalReason = '顶部翻红跌破'; }
+
+            // 规则 B：[新增机制] 狂风半路上车！如果错过了变色，但现在风力极大(>25)，直接杀入！
+            if (signal === 'WAIT') {
+                if (currentTrend === 'LONG' && curWindForce >= 25) { signal = 'LONG'; signalReason = '狂风顺势追击(半路上车)'; }
+                if (currentTrend === 'SHORT' && curWindForce >= 25) { signal = 'SHORT'; signalReason = '狂风顺势追击(半路上车)'; }
+            }
 
             if (signal === 'WAIT') { continue; }
 
-            // 👑 【大盘过滤机制生效区】
-            // 如果战车想逆着大饼做单，直接拦下来！(但大饼自己除外)
+            // 👑 【大盘过滤机制】大饼哥最后把关
             if (symbol !== 'BTCUSDT' && signal !== btcTrend) {
                 console.log(`🚫 [风控拦截] ${symbol} 想做 ${signal === 'LONG'?'🟢多':'🔴空'}，但大饼哥脸色是 ${btcTrend === 'LONG'?'🟢多':'🔴空'}，逆势单已强制取消！`);
-                continue; // 铁血指令：直接跳过，不准开火！
+                continue; 
             }
 
             let budget = snap.available * POSITION_RISK_PERCENT; 
@@ -267,7 +275,7 @@ async function runMonitor() {
             let requiredMargin = (qty * curPrice / LEVERAGE);
             if (snap.available < requiredMargin) { console.log(`⚠️ [${symbol}] 弹药枯竭，无法开火！`); continue; }
 
-            console.log(`🔥 [${symbol}] 大盘共振确立！执行 ${signal}！兵力: ${qty}`);
+            console.log(`🔥 [${symbol}] 大盘共振确立！执行 ${signal}！原因: ${signalReason}！`);
             const side = signal === 'LONG' ? 'BUY' : 'SELL';
             const res = await binanceReq('/fapi/v1/order', { symbol, side, type: 'MARKET', quantity: qty });
             
@@ -277,8 +285,8 @@ async function runMonitor() {
                 const revSide = signal === 'LONG' ? 'SELL' : 'BUY';
                 await binanceReq('/fapi/v1/algoOrder', { algoType: 'CONDITIONAL', symbol, side: revSide, type: 'TRAILING_STOP_MARKET', callbackRate: '3.0', quantity: qty, reduceOnly: 'true' });
                 
-                sendFeishu(`🎯 军神战报 | V12.6 大盘共振开火`, 
-                    `标的: ${symbol}\n方向: ${signal === 'LONG' ? '🟢 做多' : '🔴 做空'}\n投入: 约 ${requiredMargin.toFixed(2)}U\n防线: 3.0%止损 + 棘轮锁润 + BTC大盘顺势！`
+                sendFeishu(`🎯 军神战报 | V12.7 猎鹰出击`, 
+                    `标的: ${symbol}\n方向: ${signal === 'LONG' ? '🟢 做多' : '🔴 做空'}\n战术: ${signalReason}\n投入: 约 ${requiredMargin.toFixed(2)}U\n防线: 已通过BTC过滤 + 3%止损兜底！`
                 );
             }
         }
@@ -288,7 +296,7 @@ async function runMonitor() {
 http.createServer((req, res) => {
     let realPnl = initialBalance !== null ? (currentBalance - initialBalance) : 0;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end(`<h1>V12.6 大饼独裁终极版战车</h1><h3>10币并发 | 大盘趋势过滤 + 断网防爆盾</h3><p>本次开机净利润: ${realPnl.toFixed(3)} U</p><p>启动时间(北京): ${startTimeBJ}</p>`);
+    res.end(`<h1>V12.7 猎鹰出击版战车</h1><h3>10币并发 | 降维风力(ADX>12) + 狂风半路上车(ADX>25) + 大饼护体</h3><p>本次开机净利润: ${realPnl.toFixed(3)} U</p><p>启动时间(北京): ${startTimeBJ}</p>`);
 }).listen(process.env.PORT || 3000);
 
 setInterval(() => {
@@ -303,7 +311,7 @@ setInterval(() => {
         }
     });
     if (!activePos) msg += `- 全军休眠/瞄准中 💤\n`;
-    sendFeishu("📊 V12.6 战区巡航 (每小时播报)", msg);
+    sendFeishu("📊 V12.7 战区巡航 (每小时播报)", msg);
 }, 1 * 60 * 60 * 1000); 
 
 setInterval(runMonitor, CHECK_INTERVAL_MS);
