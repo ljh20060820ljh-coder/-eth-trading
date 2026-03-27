@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const querystring = require('querystring');
 
 // ==========================================
-// 🔐 核心配置区 (V12.5 全景雷达版)
+// 🔐 核心配置区 (V12.6 大饼独裁终极版)
 // ==========================================
 const FEISHU_WEBHOOK_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/6099f609-41c4-4364-b0d8-fdb986b821a2"; 
 
@@ -23,26 +23,19 @@ const LEVERAGE = 20;
 const POSITION_RISK_PERCENT = 0.25; 
 const CHECK_INTERVAL_MS = 2 * 60 * 1000; 
 
-// 🎯 状态与真实资金管理
 let positions = {};
 SYMBOLS.forEach(sym => {
     positions[sym] = { status: 'NONE', entryPrice: 0, qty: 0, superTrendLine: 0, maxMfe: 0, dynamicStopPrice: 0 };
 });
 
-// 获取标准北京时间函数
-function getBJTime() {
-    return new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
-}
+function getBJTime() { return new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }); }
 
-let initialBalance = null; // 记录开机时的真实钱包余额
-let currentBalance = 0;    // 当前真实钱包余额
+let initialBalance = null; 
+let currentBalance = 0;    
 let startTimeBJ = getBJTime();
 
-console.log(`🚀 V12.5 全景雷达版启动！[已开启底层满负荷扫描播报]`);
+console.log(`🚀 V12.6 大饼独裁终极版启动！[已加入BTC大盘共振过滤 + 失联防爆盾]`);
 
-// ==========================================
-// 📡 飞书军用面板引擎
-// ==========================================
 async function sendFeishu(title, message) {
     if (!FEISHU_WEBHOOK_URL || FEISHU_WEBHOOK_URL.includes("这里填入")) return;
     const content = `【${title}】\n------------------\n${message}\n北京时间: ${getBJTime()}`;
@@ -52,7 +45,7 @@ async function sendFeishu(title, message) {
     const req = https.request(options); req.write(data); req.end();
 }
 
-sendFeishu("⚡ V12.5 战车重新部署", "长官！系统已升级至 V12.5 全景雷达版！测风仪已全功率开启，正在为您进行全天候无死角扫盘！");
+sendFeishu("⚡ V12.6 战车重新部署", "长官！系统已升级至 V12.6 终极版！【BTC趋势共振过滤】及【断网失联预案】已全功率上线，彻底封死逆势画门陷阱！");
 
 async function binanceReq(path, params, method = 'POST') {
     params.timestamp = Date.now();
@@ -176,11 +169,21 @@ async function runMonitor() {
         await checkPositions();
         const snap = await getWallet();
         
-        // 💰 真实资金核算逻辑
-        if (initialBalance === null && snap.total > 0) {
-            initialBalance = snap.total; 
-        }
+        if (initialBalance === null && snap.total > 0) { initialBalance = snap.total; }
         currentBalance = snap.total;
+
+        // 👑 【最高优先级】请示 BTC 大饼哥的脸色
+        let btcKlines = await fetchKlines('BTCUSDT', '30m', 150);
+        
+        // [断网防线] 如果没联系上大饼哥，或者数据不够，直接全军静默防爆！
+        if (!btcKlines || btcKlines.length < 50) {
+             console.log(`⚠️ [大盘风控局] 呼叫BTC大哥失败(网络波动)，全军原地静默，暂不执行新开火！`);
+             return; 
+        }
+        
+        btcKlines = calcSuperTrend(btcKlines);
+        const btcTrend = btcKlines[btcKlines.length - 1].trend; // 获取大饼当前的趋势
+        console.log(`\n👑 [大盘风控局] BTC大哥当前脸色: ${btcTrend === 'LONG' ? '🟢 多头主导' : '🔴 空头主导'}`);
 
         for (const symbol of SYMBOLS) {
             let p = positions[symbol];
@@ -196,13 +199,12 @@ async function runMonitor() {
             const currentTrend = curK.trend;
 
             // ==========================================
-            // 🛡️ 状态一：持仓防守与收网 
+            // 🛡️ 状态一：持仓防守与收网 (平仓逃命不需要问老大)
             // ==========================================
             if (p.status !== 'NONE') {
                 let roe = p.status === 'LONG' ? (curPrice - p.entryPrice)/p.entryPrice*100 * LEVERAGE : (p.entryPrice - curPrice)/p.entryPrice*100 * LEVERAGE;
                 if (roe > p.maxMfe) p.maxMfe = roe; 
 
-                // (n-10)% 棘轮锁润机制
                 if (p.maxMfe >= 20) {
                     let lockRoe = p.maxMfe - 10; 
                     if (p.status === 'LONG') {
@@ -228,7 +230,6 @@ async function runMonitor() {
                 if (shouldClose) {
                     const side = p.status === 'LONG' ? 'SELL' : 'BUY';
                     await binanceReq('/fapi/v1/order', { symbol, side, type: 'MARKET', quantity: p.qty });
-                    
                     sendFeishu(`🩸 战车强制收网 [${symbol}]`, `平仓原因: ${closeReason}\n最高浮盈曾达: ${p.maxMfe.toFixed(2)}%\n请等待1分钟后查看账户真实余额变化！`);
                     p.status = 'NONE'; p.maxMfe = 0; p.dynamicStopPrice = 0;
                 } else {
@@ -239,10 +240,8 @@ async function runMonitor() {
             }
 
             // ==========================================
-            // ⚔️ 状态二：空仓埋伏与开火判定 (含雷达扫描)
+            // ⚔️ 状态二：空仓埋伏与开火判定
             // ==========================================
-            
-            // 指挥官专属：空仓测风仪雷达，每2分钟疯狂刷屏！
             let trendIcon = currentTrend === 'LONG' ? '🟢多' : '🔴空';
             console.log(`💤 雷达扫描 [${symbol}] | 现价:${curPrice} | 趋势:${trendIcon} | 风力(ADX):${curWindForce.toFixed(2)}`);
 
@@ -254,6 +253,13 @@ async function runMonitor() {
 
             if (signal === 'WAIT') { continue; }
 
+            // 👑 【大盘过滤机制生效区】
+            // 如果战车想逆着大饼做单，直接拦下来！(但大饼自己除外)
+            if (symbol !== 'BTCUSDT' && signal !== btcTrend) {
+                console.log(`🚫 [风控拦截] ${symbol} 想做 ${signal === 'LONG'?'🟢多':'🔴空'}，但大饼哥脸色是 ${btcTrend === 'LONG'?'🟢多':'🔴空'}，逆势单已强制取消！`);
+                continue; // 铁血指令：直接跳过，不准开火！
+            }
+
             let budget = snap.available * POSITION_RISK_PERCENT; 
             let qty = roundQty(symbol, (budget * LEVERAGE) / curPrice);
             if (qty * curPrice < 6) qty = roundQty(symbol, 6.5/curPrice); 
@@ -261,7 +267,7 @@ async function runMonitor() {
             let requiredMargin = (qty * curPrice / LEVERAGE);
             if (snap.available < requiredMargin) { console.log(`⚠️ [${symbol}] 弹药枯竭，无法开火！`); continue; }
 
-            console.log(`🔥 [${symbol}] 独立风口确立！执行 ${signal}！兵力: ${qty}`);
+            console.log(`🔥 [${symbol}] 大盘共振确立！执行 ${signal}！兵力: ${qty}`);
             const side = signal === 'LONG' ? 'BUY' : 'SELL';
             const res = await binanceReq('/fapi/v1/order', { symbol, side, type: 'MARKET', quantity: qty });
             
@@ -271,8 +277,8 @@ async function runMonitor() {
                 const revSide = signal === 'LONG' ? 'SELL' : 'BUY';
                 await binanceReq('/fapi/v1/algoOrder', { algoType: 'CONDITIONAL', symbol, side: revSide, type: 'TRAILING_STOP_MARKET', callbackRate: '3.0', quantity: qty, reduceOnly: 'true' });
                 
-                sendFeishu(`🎯 军神战报 | V12.5 棘轮开火`, 
-                    `标的: ${symbol}\n方向: ${signal === 'LONG' ? '🟢 做多' : '🔴 做空'}\n投入: 约 ${requiredMargin.toFixed(2)}U\n开仓价: ${curPrice}\n防线: 3.0%底层追踪止损 + 云端棘轮锁润！`
+                sendFeishu(`🎯 军神战报 | V12.6 大盘共振开火`, 
+                    `标的: ${symbol}\n方向: ${signal === 'LONG' ? '🟢 做多' : '🔴 做空'}\n投入: 约 ${requiredMargin.toFixed(2)}U\n防线: 3.0%止损 + 棘轮锁润 + BTC大盘顺势！`
                 );
             }
         }
@@ -280,14 +286,11 @@ async function runMonitor() {
 }
 
 http.createServer((req, res) => {
-    console.log(`🌐 收到最高指挥官或外挂哨兵的访问查岗！`);
-    
     let realPnl = initialBalance !== null ? (currentBalance - initialBalance) : 0;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end(`<h1>V12.5 全景雷达版战车</h1><h3>10币并发 | 变色斩首 + 棘轮锁润 + 全景测风雷达</h3><p>本次开机净利润: ${realPnl.toFixed(3)} U</p><p>启动时间(北京): ${startTimeBJ}</p>`);
+    res.end(`<h1>V12.6 大饼独裁终极版战车</h1><h3>10币并发 | 大盘趋势过滤 + 断网防爆盾</h3><p>本次开机净利润: ${realPnl.toFixed(3)} U</p><p>启动时间(北京): ${startTimeBJ}</p>`);
 }).listen(process.env.PORT || 3000);
 
-// ⏰ 定时战报频率：1小时
 setInterval(() => {
     let realPnl = initialBalance !== null ? (currentBalance - initialBalance) : 0;
     let msg = `💰 开机至今净利润: ${realPnl.toFixed(3)} U (已扣手续费)\n🎯 阵地状态:\n`;
@@ -300,9 +303,7 @@ setInterval(() => {
         }
     });
     if (!activePos) msg += `- 全军休眠/瞄准中 💤\n`;
-    
-    msg += `\n(注: 若服务器打盹重启，净利润将以最新余额重新起算)`;
-    sendFeishu("📊 V12.5 战区巡航 (每小时播报)", msg);
+    sendFeishu("📊 V12.6 战区巡航 (每小时播报)", msg);
 }, 1 * 60 * 60 * 1000); 
 
 setInterval(runMonitor, CHECK_INTERVAL_MS);
