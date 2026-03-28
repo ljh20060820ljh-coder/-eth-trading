@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const querystring = require('querystring');
 
 // ==========================================
-// 🔐 核心配置区 (V12.9 猎狼松绑版)
+// 🔐 核心配置区 (V12.9 猎狼战车-智能AI完全体)
 // ==========================================
 const FEISHU_WEBHOOK_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/6099f609-41c4-4364-b0d8-fdb986b821a2"; 
 
@@ -35,7 +35,7 @@ let initialBalance = null;
 let currentBalance = 0;    
 let startTimeBJ = getBJTime();
 
-console.log(`🚀 V12.9 猎狼松绑版启动！[已装载: 游击队战术 / 松绑级过滤网 / 实况转播]`);
+console.log(`🚀 V12.9 智能完全体启动！[松绑过滤网 | 战地原地收编 | 盈利豁免金牌]`);
 
 async function sendFeishu(title, message) {
     if (!FEISHU_WEBHOOK_URL || FEISHU_WEBHOOK_URL.includes("这里填入")) return;
@@ -46,7 +46,7 @@ async function sendFeishu(title, message) {
     const req = https.request(options); req.write(data); req.end();
 }
 
-sendFeishu("⚡ V12.9 猎狼战车已上线", `长官！系统已升级至 V12.9 猎狼松绑版！\n三大枷锁已解除(风力豁免/轻微波动/环比放量)，狼群已出笼，准备大开杀戒！`);
+sendFeishu("⚡ V12.9 完全体已上线", `长官！系统已升级至 V12.9 AI完全体！\n三大枷锁全面解除！且已装载【战地原地收编】与【盈利豁免】智能机制！`);
 
 async function binanceReq(path, params, method = 'POST') {
     params.timestamp = Date.now();
@@ -165,7 +165,7 @@ async function checkPositions() {
             p.entryTime = Date.now(); 
             p.tradeType = 'NORMAL'; 
         } else if (amt === 0 && p.status !== 'NONE') {
-            p.status = 'NONE'; p.dynamicStopPrice = 0; p.maxMfe = 0; p.entryTime = 0;
+            p.status = 'NONE'; p.dynamicStopPrice = 0; p.maxMfe = 0; p.entryTime = 0; p.tradeType = 'NORMAL';
         }
     }
 }
@@ -215,25 +215,37 @@ async function runMonitor() {
                 let shouldClose = false;
                 let closeReason = '';
 
-                // 大趋势反转斩首
-                if (p.status === 'LONG' && currentTrend === 'SHORT') { shouldClose = true; closeReason = '30m 趋势翻红，斩首！'; }
-                if (p.status === 'SHORT' && currentTrend === 'LONG') { shouldClose = true; closeReason = '30m 趋势翻绿，斩首！'; }
+                // 大趋势反转斩首 (统一铁律)
+                if (p.status === 'LONG' && currentTrend === 'SHORT') { shouldClose = true; closeReason = '30m 趋势翻红，彻底斩首！'; }
+                if (p.status === 'SHORT' && currentTrend === 'LONG') { shouldClose = true; closeReason = '30m 趋势翻绿，彻底斩首！'; }
 
-                // 兵种独立防守逻辑
+                // 🌟 【AI 新机制】：战地原地收编权！
+                if (p.tradeType === 'FLASH' && p.status === btcTrend4H) {
+                    p.tradeType = 'NORMAL'; // 升级！
+                    console.log(`🎖️ [战地收编] ${symbol} 游击队熬出头，大盘已共振！就地转正为【🟢正规军】！解除时间炸弹！`);
+                    sendFeishu(`🎖️ 游击队转正 [${symbol}]`, `4H大部队已到达！方向完美共振！\n已为该部队解除2小时撤离命令，向着20%星辰大海进发！`);
+                }
+
+                // 分兵种独立防守逻辑
                 if (p.tradeType === 'FLASH') {
-                    // ⚡ 游击队：见好就收，ROE>10%开始锁润
+                    // ⚡ 游击队：见好就收，ROE>=10%开始锁润
                     if (p.maxMfe >= 10) {
                         let lockRoe = p.maxMfe - 5; 
                         let calcStop = p.status === 'LONG' ? p.entryPrice * (1 + (lockRoe/100/LEVERAGE)) : p.entryPrice * (1 - (lockRoe/100/LEVERAGE));
                         if (p.status === 'LONG' && (!p.dynamicStopPrice || calcStop > p.dynamicStopPrice)) p.dynamicStopPrice = calcStop;
                         if (p.status === 'SHORT' && (!p.dynamicStopPrice || calcStop < p.dynamicStopPrice)) p.dynamicStopPrice = calcStop;
                     }
-                    // ⏳ 时间熔断：2小时(7200000ms)强制撤离
-                    if (Date.now() - p.entryTime >= 2 * 60 * 60 * 1000) {
-                        shouldClose = true; closeReason = '⏳ 游击队2小时时间熔断，强行撤离！';
+                    
+                    // ⏳ 时间熔断检测 (带盈利豁免权)
+                    if (!shouldClose && Date.now() - p.entryTime >= 2 * 60 * 60 * 1000) {
+                        if (p.maxMfe >= 10) {
+                            console.log(`🌟 [盈利豁免] ${symbol} 游击队已到2小时，但利润达标(当前最高${p.maxMfe.toFixed(1)}%)，激活豁免权，交由锁润线控制！`);
+                        } else {
+                            shouldClose = true; closeReason = '⏳ 游击队2小时大限已到，且利润未达豁免线，强制撤离！';
+                        }
                     }
                 } else {
-                    // 🟢 正规军：吃大波段，ROE>20%开始锁润
+                    // 🟢 正规军：吃大波段，ROE>=20%开始锁润
                     if (p.maxMfe >= 20) {
                         let lockRoe = p.maxMfe - 10; 
                         let calcStop = p.status === 'LONG' ? p.entryPrice * (1 + (lockRoe/100/LEVERAGE)) : p.entryPrice * (1 - (lockRoe/100/LEVERAGE));
@@ -242,25 +254,27 @@ async function runMonitor() {
                     }
                 }
 
+                // 物理锁润触发
                 if (!shouldClose && p.dynamicStopPrice) {
-                    if (p.status === 'LONG' && curPrice <= p.dynamicStopPrice) { shouldClose = true; closeReason = `触发锁润线！`; }
-                    if (p.status === 'SHORT' && curPrice >= p.dynamicStopPrice) { shouldClose = true; closeReason = `触发锁润线！`; }
+                    if (p.status === 'LONG' && curPrice <= p.dynamicStopPrice) { shouldClose = true; closeReason = `触发阶梯锁润线！利润落袋！`; }
+                    if (p.status === 'SHORT' && curPrice >= p.dynamicStopPrice) { shouldClose = true; closeReason = `触发阶梯锁润线！利润落袋！`; }
                 }
 
                 if (shouldClose) {
                     const side = p.status === 'LONG' ? 'SELL' : 'BUY';
                     await binanceReq('/fapi/v1/order', { symbol, side, type: 'MARKET', quantity: p.qty });
                     sendFeishu(`🩸 收网战报 [${symbol}]`, `兵种: ${p.tradeType==='FLASH'?'⚡游击队':'🟢正规军'}\n平仓原因: ${closeReason}\n最高浮盈: ${p.maxMfe.toFixed(2)}%`);
-                    p.status = 'NONE'; p.maxMfe = 0; p.dynamicStopPrice = 0; p.entryTime = 0;
+                    p.status = 'NONE'; p.maxMfe = 0; p.dynamicStopPrice = 0; p.entryTime = 0; p.tradeType = 'NORMAL';
                 } else {
                     let lockStr = p.dynamicStopPrice ? ` | 锁润线:${p.dynamicStopPrice.toFixed(PRICE_PRECISION[symbol]||2)}` : '';
-                    console.log(`🛡️ [${symbol}] ${p.tradeType==='FLASH'?'⚡游击':'🟢正规'} | 现价:${curPrice} | ROE:${roe.toFixed(2)}%${lockStr}`);
+                    let timeStr = p.tradeType === 'FLASH' ? ` | 距强平:${((2*3600000 - (Date.now() - p.entryTime))/60000).toFixed(0)}分` : '';
+                    console.log(`🛡️ [${symbol}] ${p.tradeType==='FLASH'?'⚡游击':'🟢正规'} | 现价:${curPrice} | ROE:${roe.toFixed(2)}%${lockStr}${timeStr}`);
                 }
                 continue;
             }
 
             // ==========================================
-            // ⚔️ 状态二：雷达扫描与 V12.9 松绑过滤网
+            // ⚔️ 状态二：雷达扫描与 V12.9 松绑版过滤网
             // ==========================================
             let trendIcon = currentTrend === 'LONG' ? '🟢多' : '🔴空';
             console.log(`💤 扫描 [${symbol}] | 现价:${curPrice} | 趋势:${trendIcon} | 风力(ADX):${curWindForce.toFixed(1)}`);
@@ -277,17 +291,17 @@ async function runMonitor() {
             // 🛑 【第一道拦截】风力及格线
             if (curWindForce < 12) { console.log(`🚫 [拦截] 风力太弱(${curWindForce.toFixed(1)} < 12)。放弃。`); continue; }
             
-            // 🛑 【第二道拦截】松绑版：风力衰减 (风力大干20直接豁免)
+            // 🛑 【第二道拦截】松绑版：风力豁免权
             if (curWindForce < 20 && curWindForce <= adx4ago) { 
                 console.log(`🚫 [拦截] 风力衰弱且未达豁免线(20)！当前(${curWindForce.toFixed(1)}) ≦ 2小时前(${adx4ago.toFixed(1)})，强弩之末！`); continue; 
             }
             
-            // 🛑 【第三道拦截】松绑版：波动率 (只需大于均值 60%)
+            // 🛑 【第三道拦截】松绑版：波动率门槛降至 60%
             if (curK.atr < avgAtr24h * 0.6) { 
                 console.log(`🚫 [拦截] 波动极其萎缩！当前ATR低于均值60%。一潭死水，不碰！`); continue; 
             }
             
-            // 🛑 【第四道拦截】松绑版：成交量 (只要大于上一根 K 线即放行)
+            // 🛑 【第四道拦截】松绑版：温和资金流
             if (curK.v <= prevK.v) { 
                 console.log(`🚫 [拦截] 资金未流入！当前成交量未超上一根K线。无量不跟！`); continue; 
             }
@@ -296,7 +310,7 @@ async function runMonitor() {
             let activePosCount = Object.values(positions).filter(p => p.status !== 'NONE').length;
             if (activePosCount >= MAX_SIMULTANEOUS_POSITIONS) { console.log(`🚫 [拦截] 阵地已满员(${MAX_SIMULTANEOUS_POSITIONS}只)！自动锁枪！`); continue; }
 
-            // ⚔️ 【大盘鉴定与战术分发】
+            // ⚔️ 【大盘双轨制分发】
             let tradeType = 'NORMAL';
             let slRate = '3.0'; 
             if (signal !== btcTrend4H) {
@@ -314,7 +328,7 @@ async function runMonitor() {
             let requiredMargin = (qty * curPrice / LEVERAGE);
             if (snap.available < requiredMargin) { console.log(`⚠️ [${symbol}] 弹药枯竭，无法开火！`); continue; }
 
-            console.log(`🔥 [${symbol}] V12.9 猎狼通过！拔枪开火！`);
+            console.log(`🔥 [${symbol}] V12.9 猎狼安检通过！拔枪开火！`);
             const side = signal === 'LONG' ? 'BUY' : 'SELL';
             const res = await binanceReq('/fapi/v1/order', { symbol, side, type: 'MARKET', quantity: qty });
             
@@ -325,8 +339,8 @@ async function runMonitor() {
                 const revSide = signal === 'LONG' ? 'SELL' : 'BUY';
                 await binanceReq('/fapi/v1/algoOrder', { algoType: 'CONDITIONAL', symbol, side: revSide, type: 'TRAILING_STOP_MARKET', callbackRate: slRate, quantity: qty, reduceOnly: 'true' });
                 
-                sendFeishu(`🎯 猎狼战报 | 战神出击`, 
-                    `标的: ${symbol}\n方向: ${signal === 'LONG' ? '🟢 做多' : '🔴 做空'}\n战机: ${tactic}\n兵种: ${tradeType==='FLASH'?'⚡游击队 (1.5%止损)':'🟢正规军 (3.0%止损)'}\n投入: 约 ${requiredMargin.toFixed(2)}U`
+                sendFeishu(`🎯 战神开火 | V12.9 AI猎狼`, 
+                    `标的: ${symbol}\n方向: ${signal === 'LONG' ? '🟢 做多' : '🔴 做空'}\n战机: ${tactic}\n兵种: ${tradeType==='FLASH'?'⚡游击队 (1.5%物理止损)':'🟢正规军 (3.0%物理止损)'}\n投入: 约 ${requiredMargin.toFixed(2)}U`
                 );
             }
         }
@@ -336,7 +350,7 @@ async function runMonitor() {
 http.createServer((req, res) => {
     let realPnl = initialBalance !== null ? (currentBalance - initialBalance) : 0;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end(`<h1>V12.9 猎狼战车 (松绑版)</h1><h3>松绑过滤网 | 双轨制大盘 | 游击队战术</h3><p>本次开机净利润: ${realPnl.toFixed(3)} U</p><p>启动时间: ${startTimeBJ}</p>`);
+    res.end(`<h1>V12.9 AI 完全体战车</h1><h3>战地收编 | 盈利豁免 | 松绑过滤</h3><p>本次开机净利润: ${realPnl.toFixed(3)} U</p><p>启动时间: ${startTimeBJ}</p>`);
 }).listen(process.env.PORT || 3000);
 
 setInterval(() => {
@@ -346,13 +360,14 @@ setInterval(() => {
     SYMBOLS.forEach(s => { 
         let p = positions[s]; 
         if (p.status !== 'NONE') {
-            msg += `- ${s}: ${p.status} (${p.tradeType==='FLASH'?'⚡':'🟢'}) | 浮盈最高:${p.maxMfe.toFixed(1)}%\n`; 
+            let timeStr = p.tradeType === 'FLASH' ? `(倒计时${((2*3600000 - (Date.now() - p.entryTime))/60000).toFixed(0)}分)` : '';
+            msg += `- ${s}: ${p.status} (${p.tradeType==='FLASH'?'⚡':'🟢'}${timeStr}) | 浮盈最高:${p.maxMfe.toFixed(1)}%\n`; 
             activePosCount++;
         }
     });
     msg += `\n🛡️ 并发限制: ${activePosCount} / ${MAX_SIMULTANEOUS_POSITIONS}`;
     if (activePosCount === 0) msg += `\n- 全军休眠/猎物追踪中 🐺\n`;
-    sendFeishu("📊 V12.9 猎狼巡航 (每小时播报)", msg);
+    sendFeishu("📊 V12.9 AI战车巡航 (每小时播报)", msg);
 }, 1 * 60 * 60 * 1000); 
 
 setInterval(runMonitor, CHECK_INTERVAL_MS);
