@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const querystring = require('querystring');
 
 // ==========================================
-// 🔐 核心配置区 (V14.0 绝地求生·单发狙击版)
+// 🔐 核心配置区 (V14.1 绝地狙击·心跳汇报版)
 // ==========================================
 const FEISHU_WEBHOOK_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/6099f609-41c4-4364-b0d8-fdb986b821a2"; 
 
@@ -20,8 +20,8 @@ const PRICE_PRECISION = { 'BTCUSDT': 1, 'ETHUSDT': 2, 'SOLUSDT': 3, 'DOGEUSDT': 
 const QTY_PRECISION = { 'BTCUSDT': 3, 'ETHUSDT': 3, 'SOLUSDT': 1, 'DOGEUSDT': 0, 'BNBUSDT': 2, 'XRPUSDT': 1, 'AVAXUSDT': 1, 'ADAUSDT': 0, 'LINKUSDT': 2, 'ORDIUSDT': 1, 'INJUSDT': 1 }; 
 
 const LEVERAGE = 20; 
-const POSITION_RISK_PERCENT = 0.5; // 🎯 提高单笔投入比例，应对4U小资金
-const MAX_SIMULTANEOUS_POSITIONS = 1; // 🎯 孤注一掷：同一时间只狙击一个标的
+const POSITION_RISK_PERCENT = 0.5; // 🎯 孤注一掷50%仓位
+const MAX_SIMULTANEOUS_POSITIONS = 1; // 🎯 仅开1单
 const CHECK_INTERVAL_MS = 2 * 60 * 1000; 
 
 let positions = {};
@@ -35,7 +35,7 @@ let initialBalance = null;
 let currentBalance = 0;    
 let startTimeBJ = getBJTime();
 
-console.log(`🚀 V14.0 绝地求生启动！[单发狙击模式 | 12H禁闭 | 仅打同频顺势]`);
+console.log(`🚀 V14.1 绝地求生启动！[单发狙击 | 12H禁闭 | 仅打同频顺势 | 已恢复心跳汇报]`);
 
 async function sendFeishu(title, message) {
     if (!FEISHU_WEBHOOK_URL || FEISHU_WEBHOOK_URL.includes("这里填入")) return;
@@ -46,7 +46,7 @@ async function sendFeishu(title, message) {
     const req = https.request(options); req.write(data); req.end();
 }
 
-sendFeishu("🔥 V14.0 背水一战上线", `长官！系统已切换至 4U 绝地狙击模式！\n1. 严禁逆势！只做同频单！\n2. 严禁贪多！并发限制为1！\n3. 12小时重刑禁闭，绝不交连续学费！`);
+sendFeishu("🔥 V14.1 狙击手就位", `长官！4U绝地狙击已上线！\n已恢复【每小时平安汇报】与【后台观测日志】，狙击手潜伏中，等待绝杀时刻！`);
 
 async function binanceReq(path, params, method = 'POST') {
     params.timestamp = Date.now();
@@ -163,7 +163,6 @@ async function checkPositions() {
             p.status = amt > 0 ? 'LONG' : 'SHORT'; p.entryPrice = parseFloat(r.entryPrice); p.qty = Math.abs(amt);
             p.entryTime = Date.now(); 
         } else if (amt === 0 && p.status !== 'NONE') {
-            // 🛡️ V14.0 铁律：物理防线触碰，直接关押 12 小时！
             console.log(`🚨 [防线崩溃] ${symbol} 已触发硬止损，全军禁闭 12 小时！`);
             p.penaltyBoxUntil = Date.now() + 12 * 60 * 60 * 1000;
             p.status = 'NONE'; p.dynamicStopPrice = 0; p.maxMfe = 0; p.entryTime = 0;
@@ -175,17 +174,23 @@ async function runMonitor() {
     try {
         await checkPositions();
         const snap = await getWallet();
-        if (initialBalance === null) initialBalance = snap.total;
+        if (initialBalance === null && snap.total > 0) initialBalance = snap.total;
         currentBalance = snap.total;
 
         let btc4hKlines = await fetchKlines('BTCUSDT', '4h', 50);
-        if (!btc4hKlines || btc4hKlines.length < 20) return;
+        if (!btc4hKlines || btc4hKlines.length < 20) {
+            console.log(`⚠️ [大盘风控] 呼叫大饼失败！`); return;
+        }
         btc4hKlines = calcSuperTrend(btc4hKlines);
         const btcTrend4H = btc4hKlines[btc4hKlines.length - 1].trend;
+        console.log(`\n👑 [大盘风控局] BTC 4H 宏观大势: ${btcTrend4H === 'LONG' ? '🟢 多头压制' : '🔴 空头压制'}`);
 
         for (const symbol of SYMBOLS) {
             let p = positions[symbol];
-            if (Date.now() < p.penaltyBoxUntil) continue;
+            if (Date.now() < p.penaltyBoxUntil) {
+                // 静默关押中
+                continue;
+            }
 
             let k30m = await fetchKlines(symbol, '30m', 150);
             if (k30m.length < 50) continue;
@@ -198,8 +203,12 @@ async function runMonitor() {
             const curPrice = curK.c;
             const currentTrend = curK.trend;
 
+            // 🌟 恢复后台扫描日志汇报
+            let syncStatus = (currentTrend === btcTrend4H) ? '同频✅' : '逆势🚫';
+            console.log(`💤 瞄准镜 [${symbol}] | 现价:${curPrice} | 趋势:${currentTrend==='LONG'?'🟢':'🔴'} (${syncStatus}) | 风力(ADX):${curWindForce.toFixed(1)}`);
+
             // ==========================================
-            // 🛡️ 持仓管理 (V14.0 绝地防守)
+            // 🛡️ 持仓管理 (V14.1)
             // ==========================================
             if (p.status !== 'NONE') {
                 let roe = p.status === 'LONG' ? (curPrice - p.entryPrice)/p.entryPrice*100 * LEVERAGE : (p.entryPrice - curPrice)/p.entryPrice*100 * LEVERAGE;
@@ -208,17 +217,14 @@ async function runMonitor() {
                 let shouldClose = false;
                 let closeReason = '';
 
-                // 1. 趋势反转斩首
                 if (p.status === 'LONG' && currentTrend === 'SHORT') { shouldClose = true; closeReason = '趋势翻红'; }
                 if (p.status === 'SHORT' && currentTrend === 'LONG') { shouldClose = true; closeReason = '趋势翻绿'; }
 
-                // 2. 动能衰竭主动逃顶 (ROE > 15%)
                 if (!shouldClose && roe >= 15) {
                     if (p.status === 'LONG' && curK.c < curK.o && curWindForce < prevWindForce) { shouldClose = true; closeReason = '动能衰竭逃顶'; }
                     else if (p.status === 'SHORT' && curK.c > curK.o && curWindForce < prevWindForce) { shouldClose = true; closeReason = '动能衰竭逃顶'; }
                 }
 
-                // 3. 物理锁润
                 if (p.maxMfe >= 20) {
                     let lockRoe = p.maxMfe - 10;
                     let calcStop = p.status === 'LONG' ? p.entryPrice * (1 + (lockRoe/100/LEVERAGE)) : p.entryPrice * (1 - (lockRoe/100/LEVERAGE));
@@ -247,41 +253,43 @@ async function runMonitor() {
             }
 
             // ==========================================
-            // ⚔️ 狙击扫描 (V14.0 飓风级筛选)
+            // ⚔️ 狙击扫描
             // ==========================================
             let signal = 'WAIT';
             if (prevK.trend === 'SHORT' && currentTrend === 'LONG') signal = 'LONG';
             else if (prevK.trend === 'LONG' && currentTrend === 'SHORT') signal = 'SHORT';
 
             if (signal === 'WAIT') continue;
-
-            // 1. 禁令检查：必须与大饼 4H 同向！
             if (signal !== btcTrend4H) continue; 
+            if (curWindForce < 25) {
+                console.log(`🚫 [风控] ${symbol} 信号同频，但风力不够(${curWindForce.toFixed(1)} < 25)，放弃狙击！`);
+                continue;
+            }
 
-            // 2. 飓风检查：ADX 必须 > 25！
-            if (curWindForce < 25) continue;
-
-            // 3. 量能锁：必须大于近10根均量 1.2 倍！
             let sumVol = 0; for(let i = k30m.length - 11; i < k30m.length - 1; i++) sumVol += k30m[i].v;
-            if (curK.v < (sumVol / 10) * 1.2) continue;
+            if (curK.v < (sumVol / 10) * 1.2) {
+                console.log(`🚫 [风控] ${symbol} 信号同频风也大，但量能未达标，拒绝盲目开火！`);
+                continue;
+            }
 
-            // 4. 并发限制：只打 1 发子弹！
             let activeCount = Object.values(positions).filter(x => x.status !== 'NONE').length;
             if (activeCount >= MAX_SIMULTANEOUS_POSITIONS) continue;
 
-            // 🔫 狙击开火
             let budget = snap.available * POSITION_RISK_PERCENT; 
             let qty = roundQty(symbol, (budget * LEVERAGE) / curPrice);
-            if (qty * curPrice < 6.5) qty = roundQty(symbol, 6.5/curPrice); // 强行拉过币安 5U 线
+            if (qty * curPrice < 6.5) qty = roundQty(symbol, 6.5/curPrice); 
 
             console.log(`🔥 [${symbol}] 锁定！正在进行背水一战狙击！`);
             const side = signal === 'LONG' ? 'BUY' : 'SELL';
             const res = await binanceReq('/fapi/v1/order', { symbol, side, type: 'MARKET', quantity: qty });
             
             if (!res.code) {
+                p.status = signal; p.entryPrice = curPrice; p.qty = qty; 
+                p.entryTime = Date.now();
+                
                 const revSide = signal === 'LONG' ? 'SELL' : 'BUY';
                 await binanceReq('/fapi/v1/algoOrder', { algoType: 'CONDITIONAL', symbol, side: revSide, type: 'TRAILING_STOP_MARKET', callbackRate: '3.0', quantity: qty, reduceOnly: 'true' });
-                sendFeishu(`🎯 狙击手就位`, `标的: ${symbol}\n方向: ${signal === 'LONG'?'🟢多':'🔴空'}\n投入: 约 ${budget.toFixed(2)}U\n这是最后的弹药，祝我们好运！`);
+                sendFeishu(`🎯 狙击手开火！`, `标的: ${symbol}\n方向: ${signal === 'LONG'?'🟢多':'🔴空'}\n投入: 约 ${budget.toFixed(2)}U\n这是最后的弹药，祝我们好运！`);
             }
         }
     } catch(e) { console.error("引擎异常:", e.message); }
@@ -290,8 +298,25 @@ async function runMonitor() {
 http.createServer((req, res) => {
     let realPnl = initialBalance !== null ? (currentBalance - initialBalance) : 0;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end(`<h1>V14.0 绝地狙击战车</h1><p>剩余本金: ${currentBalance.toFixed(3)} U</p><p>启动至今PNL: ${realPnl.toFixed(3)} U</p>`);
+    res.end(`<h1>V14.1 绝地狙击战车</h1><p>剩余本金: ${currentBalance.toFixed(3)} U</p><p>启动至今PNL: ${realPnl.toFixed(3)} U</p>`);
 }).listen(process.env.PORT || 3000);
+
+// 🌟 恢复每小时飞书平安播报！
+setInterval(() => {
+    let msg = `🎯 当前狙击状态: 潜伏中 🐺\n(V14.1 狙击模式: 仅打风力>25的同频顺风局)\n`;
+    let activePosCount = 0;
+    SYMBOLS.forEach(s => { 
+        let p = positions[s]; 
+        if (p.status !== 'NONE') {
+            msg += `- ${s}: ${p.status} | 浮盈最高:${p.maxMfe.toFixed(1)}%\n`; 
+            activePosCount++;
+        } else if (Date.now() < p.penaltyBoxUntil) {
+            msg += `- ${s}: 🚫 禁闭中 (剩余 ${((p.penaltyBoxUntil - Date.now())/3600000).toFixed(1)} 小时)\n`;
+        }
+    });
+    if (activePosCount === 0) msg += `\n- 弹药已上膛，正在静待猎物...`;
+    sendFeishu("📊 V14.1 狙击手巡航 (每小时平安报)", msg);
+}, 1 * 60 * 60 * 1000); 
 
 setInterval(runMonitor, CHECK_INTERVAL_MS);
 runMonitor();
