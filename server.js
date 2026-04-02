@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const querystring = require('querystring');
 
 // ==========================================
-// 🔐 核心配置区 (V16.0 全能混合战舰 - 自适应双模版)
+// 🔐 核心配置区 (V16.1 混合战舰 - 完整日志版)
 // ==========================================
 const FEISHU_WEBHOOK_URL = process.env.FEISHU_WEBHOOK || "https://open.feishu.cn/open-apis/bot/v2/hook/6099f609-41c4-4364-b0d8-fdb986b821a2"; 
 const BINANCE_API_KEY = process.env.BINANCE_API_KEY;
@@ -29,12 +29,16 @@ SYMBOLS.forEach(sym => {
 function getBJTime() { return new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }); }
 let initialBalance = null, currentBalance = 0;
 
+console.log(`🚀 V16.1 混合战舰启动！[震荡与趋势双引擎 | 细节播报已恢复]`);
+
 async function sendFeishu(title, message) {
     if (!FEISHU_WEBHOOK_URL || FEISHU_WEBHOOK_URL.includes("这里填入")) return;
     const content = `【${title}】\n------------------\n${message}\n北京时间: ${getBJTime()}`;
     const options = { hostname: 'open.feishu.cn', path: new URL(FEISHU_WEBHOOK_URL).pathname, method: 'POST', headers: { 'Content-Type': 'application/json' } };
     const req = https.request(options); req.write(JSON.stringify({ msg_type: "text", content: { text: content } })); req.end();
 }
+
+sendFeishu("🔥 V16.1 全能战舰上线", `长官！已为您恢复全部后台细节雷达与心跳播报！\n双档位引擎运转正常：ADX<25打震荡，ADX>=25拼单边！`);
 
 async function binanceReq(path, params, method = 'POST') {
     params.timestamp = Date.now();
@@ -60,7 +64,6 @@ async function fetchKlines(symbol, interval = '30m', limit = 100) {
     });
 }
 
-// --- 🛠️ 武器库：指标算法 ---
 function calcRSI(klines, p=14) {
     if (klines.length < p+1) return klines;
     let ag=0, al=0;
@@ -123,7 +126,8 @@ async function runMonitor() {
             if(r){
                 const amt=parseFloat(r.positionAmt);
                 if(amt===0 && positions[s].status!=='NONE'){ 
-                    positions[s].penaltyBoxUntil=Date.now()+6*3600000; positions[s].status='NONE'; 
+                    console.log(`🚨 [防线崩溃] ${s} 触发物理硬止损，关押 6 小时防报复！`);
+                    positions[s].penaltyBoxUntil=Date.now()+6*3600000; positions[s].status='NONE'; positions[s].maxMfe=0;
                 } else if(amt!==0){ 
                     positions[s].status=amt>0?'LONG':'SHORT'; positions[s].qty=Math.abs(amt); positions[s].entryPrice=parseFloat(r.entryPrice); 
                 }
@@ -133,74 +137,145 @@ async function runMonitor() {
         const wallet = await binanceReq('/fapi/v2/account', {}, 'GET');
         if(!wallet.availableBalance){ isProcessing=false; return; }
         currentBalance=parseFloat(wallet.totalMarginBalance);
-        if(initialBalance===null) initialBalance=currentBalance;
+        if(initialBalance===null && currentBalance > 0) initialBalance=currentBalance;
 
         // 呼叫统帅
         let btc4h = await fetchKlines('BTCUSDT', '4h', 50); btc4h=calcSuperTrend(btc4h);
         const btcTrend=btc4h[btc4h.length-2].trend;
+        const btcADX = calcADX(btc4h.slice(0, btc4h.length - 1));
+
+        console.log(`\n👑 [大盘统帅] BTC 4H趋势: ${btcTrend === 'LONG' ? '🟢多' : '🔴空'} | 大饼风力: ${btcADX.toFixed(1)}`);
 
         for(const symbol of SYMBOLS){
-            let p=positions[symbol]; if(Date.now()<p.penaltyBoxUntil) continue;
-            let k30m=await fetchKlines(symbol, '30m', 100);
+            let p=positions[symbol]; 
+            if(Date.now()<p.penaltyBoxUntil) continue;
+
+            let k30m=await fetchKlines(symbol, '30m', 150);
+            if(k30m.length < 50) continue;
             k30m=calcBB(k30m); k30m=calcRSI(k30m); k30m=calcSuperTrend(k30m);
-            const adx=calcADX(k30m);
+            const adx=calcADX(k30m.slice(0, k30m.length-1));
+            const prevAdx=calcADX(k30m.slice(0, k30m.length-2));
             const curClosedK=k30m[k30m.length-2], prevClosedK=k30m[k30m.length-3], liveK=k30m[k30m.length-1];
 
-            // 🎯 持仓管理
+            // 🎯 恢复雷达播报！
+            let activeMode = adx < 25 ? '🐒震荡监测' : '🌪️趋势监测';
+            let rsiStr = curClosedK.rsi ? curClosedK.rsi.toFixed(1) : '0';
+            console.log(`💤 瞄准镜 [${symbol}] | ${activeMode} | 现价:${liveK.c} | ADX:${adx.toFixed(1)} | RSI:${rsiStr} | 趋势:${curClosedK.trend==='LONG'?'🟢':'🔴'}`);
+
+            // ==========================================
+            // 🛡️ 持仓管理
+            // ==========================================
             if(p.status!=='NONE'){
-                let roe = p.status==='LONG'?(liveK.c-p.entryPrice)/p.entryPrice*2000:(p.entryPrice-liveK.c)/p.entryPrice*2000;
+                let roe = p.status==='LONG'?(liveK.c-p.entryPrice)/p.entryPrice*LEVERAGE*100:(p.entryPrice-liveK.c)/p.entryPrice*LEVERAGE*100;
                 if(roe>p.maxMfe) p.maxMfe=roe;
                 let shouldClose=false, reason='';
 
                 if(p.strategyMode==='SIDEWAYS'){
-                    if(p.status==='LONG' && liveK.c>=curClosedK.bbMid){ shouldClose=true; reason='震荡止盈：回归中轨'; }
-                    if(p.status==='SHORT' && liveK.c<=curClosedK.bbMid){ shouldClose=true; reason='震荡止盈：回归中轨'; }
+                    if(p.status==='LONG' && liveK.c>=curClosedK.bbMid){ shouldClose=true; reason='震荡止盈：吃完下轨反弹，回归中轨落袋！'; }
+                    if(p.status==='SHORT' && liveK.c<=curClosedK.bbMid){ shouldClose=true; reason='震荡止盈：狙击摸顶成功，回归中轨落袋！'; }
                 } else {
-                    if(p.status==='LONG' && curClosedK.trend==='SHORT'){ shouldClose=true; reason='趋势翻转'; }
-                    if(p.status==='SHORT' && curClosedK.trend==='LONG'){ shouldClose=true; reason='趋势翻转'; }
-                    if(!shouldClose && p.maxMfe>=20 && roe<=p.maxMfe*0.6){ shouldClose=true; reason='趋势锁润'; }
+                    if(p.status==='LONG' && curClosedK.trend==='SHORT'){ shouldClose=true; reason='趋势翻红止损'; }
+                    if(p.status==='SHORT' && curClosedK.trend==='LONG'){ shouldClose=true; reason='趋势翻绿止损'; }
+                    if(!shouldClose && p.maxMfe>=20 && roe<=p.maxMfe*0.6){ shouldClose=true; reason=`动态追踪锁润: 锁住最高利润(${p.maxMfe.toFixed(1)}%)的60%`; }
                 }
 
                 if(shouldClose){
                     const r2=await binanceReq('/fapi/v2/positionRisk',{symbol},'GET');
-                    await binanceReq('/fapi/v1/order',{symbol,side:p.status==='LONG'?'SELL':'BUY',type:'MARKET',quantity:Math.abs(r2[0].positionAmt)});
-                    await binanceReq('/fapi/v1/allOpenOrders',{symbol},'DELETE');
-                    sendFeishu(`💰 战舰收网 [${symbol}]`,`结算:${roe.toFixed(1)}% | 模式:${p.strategyMode==='SIDEWAYS'?'🐒震荡':'🌪️趋势'}\n原因:${reason}`);
+                    if (r2 && r2[0]) {
+                        await binanceReq('/fapi/v1/order',{symbol,side:p.status==='LONG'?'SELL':'BUY',type:'MARKET',quantity:Math.abs(parseFloat(r2[0].positionAmt))});
+                        await binanceReq('/fapi/v1/allOpenOrders',{symbol},'DELETE');
+                        
+                        if (roe < 0 && p.strategyMode !== 'SIDEWAYS') {
+                            p.penaltyBoxUntil = Date.now() + 6 * 3600000;
+                            sendFeishu(`🩸 战舰撤退 [${symbol}]`,`结算: ${roe.toFixed(2)}%\n模式: ${p.strategyMode==='SIDEWAYS'?'🐒震荡':'🌪️趋势'}\n原因: ${reason}\n🚫 惩罚生效：关押6小时`);
+                        } else {
+                            sendFeishu(`💰 战舰收网 [${symbol}]`,`结算: ${roe.toFixed(2)}%\n模式: ${p.strategyMode==='SIDEWAYS'?'🐒震荡':'🌪️趋势'}\n最高浮盈: ${p.maxMfe.toFixed(1)}%\n原因: ${reason}`);
+                        }
+                    }
                     p.status='NONE'; p.maxMfe=0; p.strategyMode='NONE';
+                } else {
+                    console.log(`🛡️ 守卫中 [${symbol}] | 模式:${p.strategyMode==='SIDEWAYS'?'🐒':'🌪️'} | 浮盈:${roe.toFixed(2)}% | 最高:${p.maxMfe.toFixed(1)}%`);
                 }
                 continue;
             }
 
-            // 🎯 入场扫描 (单发狙击)
+            // ==========================================
+            // ⚔️ 入场扫描 (单发狙击)
+            // ==========================================
             if(Object.values(positions).some(x=>x.status!=='NONE')) continue;
             
-            let signal='WAIT', mode='NONE';
-            if(adx < 25){ // 🐒 震荡模式
-                if(curClosedK.c<curClosedK.bbLower && curClosedK.rsi<30){ signal='LONG'; mode='SIDEWAYS'; }
-                else if(curClosedK.c>curClosedK.bbUpper && curClosedK.rsi>70){ signal='SHORT'; mode='SIDEWAYS'; }
-            } else { // 🌪️ 趋势模式
-                if(curClosedK.trend!==btcTrend) continue; // 仅同频
-                if(prevClosedK.trend!==curClosedK.trend){ signal=curClosedK.trend; mode='TRENDING'; }
-                else if(calcADX(k30m.slice(0,k30m.length-2))<25 && adx>=25){ signal=curClosedK.trend; mode='TRENDING'; }
+            let signal='WAIT', mode='NONE', tactic='';
+            
+            // 🐒 第一档：震荡模式 (风力极弱，打游击)
+            if(adx < 25){ 
+                if(curClosedK.c < curClosedK.bbLower && curClosedK.rsi < 30){ 
+                    signal='LONG'; mode='SIDEWAYS'; tactic='跌破下轨+超卖恐慌 (接刀)';
+                }
+                else if(curClosedK.c > curClosedK.bbUpper && curClosedK.rsi > 70){ 
+                    signal='SHORT'; mode='SIDEWAYS'; tactic='突破上轨+超买狂热 (摸顶)';
+                }
+            } 
+            // 🌪️ 第二档：趋势模式 (风力飙升，抓单边)
+            else { 
+                if(curClosedK.trend !== btcTrend) continue; // 必须和大饼同向
+                
+                if(prevClosedK.trend !== curClosedK.trend){ 
+                    signal=curClosedK.trend; mode='TRENDING'; tactic='趋势反转鱼头 (ADX>=25)';
+                }
+                else if(prevAdx < 25 && adx >= 25){ 
+                    signal=curClosedK.trend; mode='TRENDING'; tactic='ADX突破25油门踩死 (顺势吃鱼身)';
+                }
             }
 
-            if(signal!=='WAIT'){
-                let qty=Math.max(7/liveK.c, (currentBalance*POSITION_RISK_PERCENT*LEVERAGE)/liveK.c);
-                const res=await binanceReq('/fapi/v1/order',{symbol,side:signal==='LONG'?'BUY':'SELL',type:'MARKET',quantity:parseFloat(qty.toFixed(QTY_PRECISION[symbol]))});
+            if(signal !== 'WAIT'){
+                let qtyStr = Math.max(7.0/liveK.c, (currentBalance*POSITION_RISK_PERCENT*LEVERAGE)/liveK.c).toFixed(QTY_PRECISION[symbol] || 3);
+                let qty = parseFloat(qtyStr);
+                
+                console.log(`🔥 [${symbol}] 触发【${tactic}】！准备开火！`);
+                const res=await binanceReq('/fapi/v1/order',{symbol,side:signal==='LONG'?'BUY':'SELL',type:'MARKET',quantity:qty});
+                
                 if(!res.code){
                     p.status=signal; p.strategyMode=mode; p.entryTime=Date.now();
                     setTimeout(async()=>{
                         const r3=await binanceReq('/fapi/v2/positionRisk',{symbol},'GET');
-                        p.entryPrice=parseFloat(r3[0].entryPrice);
-                        const sl=signal==='LONG'?p.entryPrice*0.97:p.entryPrice*1.03;
-                        await binanceReq('/fapi/v1/order',{symbol,side:signal==='LONG'?'SELL':'BUY',type:'STOP_MARKET',stopPrice:parseFloat(sl.toFixed(PRICE_PRECISION[symbol])),closePosition:'true'});
-                        sendFeishu(`🎯 战舰开火`,`标的:${symbol} | 模式:${mode==='SIDEWAYS'?'🐒震荡':'🌪️趋势'}\n入场价:${p.entryPrice}`);
-                    },2000);
+                        if (r3 && r3[0]) {
+                            p.entryPrice=parseFloat(r3[0].entryPrice);
+                            const sl=signal==='LONG'?p.entryPrice*(1-HARD_STOP_LOSS_PERCENT/100):p.entryPrice*(1+HARD_STOP_LOSS_PERCENT/100);
+                            await binanceReq('/fapi/v1/order',{symbol,side:signal==='LONG'?'SELL':'BUY',type:'STOP_MARKET',stopPrice:parseFloat(sl.toFixed(PRICE_PRECISION[symbol] || 2)),closePosition:'true'});
+                            sendFeishu(`🎯 战舰已开火！`,`标的: ${symbol}\n方向: ${signal==='LONG'?'🟢做多':'🔴做空'}\n模式: ${mode==='SIDEWAYS'?'🐒震荡模式':'🌪️大趋势模式'}\n战机: ${tactic}\n入场价: ${p.entryPrice}\n物理防爆: ${sl.toFixed(PRICE_PRECISION[symbol] || 2)} (-3%)`);
+                        }
+                    }, 2000);
                 }
             }
         }
-    } catch(e){} finally { isProcessing=false; }
+    } catch(e){ console.error("🔥 引擎异常:", e.message); } finally { isProcessing=false; }
 }
 
-http.createServer((req,res)=>{ res.setHeader('Content-Type','text/html; charset=utf-8'); res.end(`<h1>V16.0 混合战舰</h1><p>PNL: ${(currentBalance-(initialBalance||currentBalance)).toFixed(3)} U</p>`); }).listen(process.env.PORT||3000);
-setInterval(runMonitor, CHECK_INTERVAL_MS); runMonitor();
+// Web 面板
+http.createServer((req,res)=>{ 
+    let realPnl = initialBalance !== null ? (currentBalance - initialBalance) : 0;
+    res.setHeader('Content-Type','text/html; charset=utf-8'); 
+    res.end(`<h1>V16.1 混合战舰</h1><h3>震荡/趋势 双引擎自动切换</h3><p>剩余本金: ${currentBalance.toFixed(3)} U</p><p>启动至今PNL: ${realPnl.toFixed(3)} U</p>`); 
+}).listen(process.env.PORT||3000);
+
+// 🌟 每小时恢复飞书播报！
+setInterval(() => {
+    let msg = `🎯 战舰自动巡航中... ⚓\n`;
+    let activePosCount = 0;
+    SYMBOLS.forEach(s => { 
+        let p = positions[s]; 
+        if (p.status !== 'NONE') {
+            msg += `- ${s}: 正在守卫 ${p.status} (${p.strategyMode==='SIDEWAYS'?'🐒':'🌪️'}) | 浮盈:${p.maxMfe.toFixed(1)}%\n`; 
+            activePosCount++;
+        } else if (Date.now() < p.penaltyBoxUntil) {
+            msg += `- ${s}: 🚫 禁闭中 (剩 ${((p.penaltyBoxUntil - Date.now())/3600000).toFixed(1)}H)\n`;
+        }
+    });
+    
+    if (activePosCount === 0) msg += `\n- 引擎双速运转：风小打游击，风大抓牛熊！`;
+    
+    sendFeishu("📊 V16.1 平安汇报", msg);
+}, 1 * 60 * 60 * 1000); 
+
+setInterval(runMonitor, CHECK_INTERVAL_MS); 
+runMonitor();
