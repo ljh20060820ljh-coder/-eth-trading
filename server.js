@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const querystring = require('querystring');
 
 // ==========================================
-// 🔐 核心配置区 (V16.1 混合战舰 - 完整日志版)
+// 🔐 核心配置区 (V16.2 混合战舰 - ADX修复版)
 // ==========================================
 const FEISHU_WEBHOOK_URL = process.env.FEISHU_WEBHOOK || "https://open.feishu.cn/open-apis/bot/v2/hook/6099f609-41c4-4364-b0d8-fdb986b821a2"; 
 const BINANCE_API_KEY = process.env.BINANCE_API_KEY;
@@ -29,7 +29,7 @@ SYMBOLS.forEach(sym => {
 function getBJTime() { return new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }); }
 let initialBalance = null, currentBalance = 0;
 
-console.log(`🚀 V16.1 混合战舰启动！[震荡与趋势双引擎 | 细节播报已恢复]`);
+console.log(`🚀 V16.2 混合战舰启动！[修复 ADX 指标 | 双引擎正式启动]`);
 
 async function sendFeishu(title, message) {
     if (!FEISHU_WEBHOOK_URL || FEISHU_WEBHOOK_URL.includes("这里填入")) return;
@@ -37,8 +37,6 @@ async function sendFeishu(title, message) {
     const options = { hostname: 'open.feishu.cn', path: new URL(FEISHU_WEBHOOK_URL).pathname, method: 'POST', headers: { 'Content-Type': 'application/json' } };
     const req = https.request(options); req.write(JSON.stringify({ msg_type: "text", content: { text: content } })); req.end();
 }
-
-sendFeishu("🔥 V16.1 全能战舰上线", `长官！已为您恢复全部后台细节雷达与心跳播报！\n双档位引擎运转正常：ADX<25打震荡，ADX>=25拼单边！`);
 
 async function binanceReq(path, params, method = 'POST') {
     params.timestamp = Date.now();
@@ -105,7 +103,8 @@ function calcADX(klines, p=14) {
     let tr=[], pdm=[], ndm=[];
     for(let i=1;i<klines.length;i++){
         tr.push(Math.max(klines[i].h-klines[i].l, Math.abs(klines[i].h-klines[i-1].c), Math.abs(klines[i].l-klines[i-1].c)));
-        let up=klines[i].h-klines[i-1].h, dn=klines[i-1].l-klines[i-1].l;
+        // 🎯 V16.2 修复：将 dn 算式从 klines[i-1].l 修正为 klines[i].l
+        let up=klines[i].h-klines[i-1].h, dn=klines[i-1].l-klines[i].l;
         pdm.push(up>dn && up>0?up:0); ndm.push(dn>up && dn>0?dn:0);
     }
     const sm = (a) => { let s=[a.slice(0,p).reduce((x,y)=>x+y)/p]; for(let i=p;i<a.length;i++) s.push((s[s.length-1]*(p-1)+a[i])/p); return s; };
@@ -139,7 +138,6 @@ async function runMonitor() {
         currentBalance=parseFloat(wallet.totalMarginBalance);
         if(initialBalance===null && currentBalance > 0) initialBalance=currentBalance;
 
-        // 呼叫统帅
         let btc4h = await fetchKlines('BTCUSDT', '4h', 50); btc4h=calcSuperTrend(btc4h);
         const btcTrend=btc4h[btc4h.length-2].trend;
         const btcADX = calcADX(btc4h.slice(0, btc4h.length - 1));
@@ -157,7 +155,6 @@ async function runMonitor() {
             const prevAdx=calcADX(k30m.slice(0, k30m.length-2));
             const curClosedK=k30m[k30m.length-2], prevClosedK=k30m[k30m.length-3], liveK=k30m[k30m.length-1];
 
-            // 🎯 恢复雷达播报！
             let activeMode = adx < 25 ? '🐒震荡监测' : '🌪️趋势监测';
             let rsiStr = curClosedK.rsi ? curClosedK.rsi.toFixed(1) : '0';
             console.log(`💤 瞄准镜 [${symbol}] | ${activeMode} | 现价:${liveK.c} | ADX:${adx.toFixed(1)} | RSI:${rsiStr} | 趋势:${curClosedK.trend==='LONG'?'🟢':'🔴'}`);
@@ -206,7 +203,6 @@ async function runMonitor() {
             
             let signal='WAIT', mode='NONE', tactic='';
             
-            // 🐒 第一档：震荡模式 (风力极弱，打游击)
             if(adx < 25){ 
                 if(curClosedK.c < curClosedK.bbLower && curClosedK.rsi < 30){ 
                     signal='LONG'; mode='SIDEWAYS'; tactic='跌破下轨+超卖恐慌 (接刀)';
@@ -214,10 +210,8 @@ async function runMonitor() {
                 else if(curClosedK.c > curClosedK.bbUpper && curClosedK.rsi > 70){ 
                     signal='SHORT'; mode='SIDEWAYS'; tactic='突破上轨+超买狂热 (摸顶)';
                 }
-            } 
-            // 🌪️ 第二档：趋势模式 (风力飙升，抓单边)
-            else { 
-                if(curClosedK.trend !== btcTrend) continue; // 必须和大饼同向
+            } else { 
+                if(curClosedK.trend !== btcTrend) continue; 
                 
                 if(prevClosedK.trend !== curClosedK.trend){ 
                     signal=curClosedK.trend; mode='TRENDING'; tactic='趋势反转鱼头 (ADX>=25)';
@@ -251,14 +245,12 @@ async function runMonitor() {
     } catch(e){ console.error("🔥 引擎异常:", e.message); } finally { isProcessing=false; }
 }
 
-// Web 面板
 http.createServer((req,res)=>{ 
     let realPnl = initialBalance !== null ? (currentBalance - initialBalance) : 0;
     res.setHeader('Content-Type','text/html; charset=utf-8'); 
-    res.end(`<h1>V16.1 混合战舰</h1><h3>震荡/趋势 双引擎自动切换</h3><p>剩余本金: ${currentBalance.toFixed(3)} U</p><p>启动至今PNL: ${realPnl.toFixed(3)} U</p>`); 
+    res.end(`<h1>V16.2 混合战舰 (修复版)</h1><h3>震荡/趋势 双引擎自动切换</h3><p>剩余本金: ${currentBalance.toFixed(3)} U</p><p>启动至今PNL: ${realPnl.toFixed(3)} U</p>`); 
 }).listen(process.env.PORT||3000);
 
-// 🌟 每小时恢复飞书播报！
 setInterval(() => {
     let msg = `🎯 战舰自动巡航中... ⚓\n`;
     let activePosCount = 0;
@@ -274,7 +266,7 @@ setInterval(() => {
     
     if (activePosCount === 0) msg += `\n- 引擎双速运转：风小打游击，风大抓牛熊！`;
     
-    sendFeishu("📊 V16.1 平安汇报", msg);
+    sendFeishu("📊 V16.2 平安汇报", msg);
 }, 1 * 60 * 60 * 1000); 
 
 setInterval(runMonitor, CHECK_INTERVAL_MS); 
