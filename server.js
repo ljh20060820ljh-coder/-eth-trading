@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const querystring = require('querystring');
 
 // ==========================================
-// 🔐 V22.1 终极主宰版 (带飞书战术播报)
+// 🔐 V25.0 火力全开版 (解除火力限制 & 原生保险闭环)
 // ==========================================
 const FEISHU_WEBHOOK_URL = process.env.FEISHU_WEBHOOK || "https://open.feishu.cn/open-apis/bot/v2/hook/6099f609-41c4-4364-b0d8-fdb986b821a2"; 
 const BINANCE_API_KEY = process.env.BINANCE_API_KEY;
@@ -18,53 +18,46 @@ const PRECISION = {
 };
 const SYMBOLS = Object.keys(PRECISION);
 
-const LEVERAGE = 10; 
-const TARGET_NOTIONAL = 6.5; 
-const MAX_HOLD_HOURS = 6; 
-const TP_FIXED = 1.5;   
-const SL_HARD = 3.5;    
-const BTC_STORM = 1.2;  
+// 🚀 火力配置区重构
+const LEVERAGE = 10;                // 强制 10 倍杠杆
+const POSITION_RISK_PERCENT = 0.5;  // 🎯 动用 50% 的本金作为保证金！(14U 会动用 7U)
+const SL_HARD = 3.5;                // 3.5% 硬止损
+const TP_FIXED = 1.5;               // 1.5% 常规止盈
+const BTC_STORM = 1.2;              // 大饼风控系数
 
 let isProcessing = false; 
 let activePos = { symbol: 'NONE', status: 'NONE', entryPrice: 0, qty: 0, maxMfe: 0, startTime: 0, mode: 'NORMAL' };
-let initialBalance = null, currentBalance = 0;
+let currentBalance = 0;
 
 function getBJTime() { return new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }); }
 
-// 📡 飞书通讯兵 (恢复并升级)
 async function sendFeishu(title, message) {
     try {
-        if (!FEISHU_WEBHOOK_URL || !FEISHU_WEBHOOK_URL.startsWith("http")) return;
-        const content = `【${title}】\n------------------\n${message}\n时间: ${getBJTime()}`;
         const options = { hostname: 'open.feishu.cn', path: new URL(FEISHU_WEBHOOK_URL).pathname, method: 'POST', headers: { 'Content-Type': 'application/json' } };
-        const req = https.request(options); req.write(JSON.stringify({ msg_type: "text", content: { text: content } })); req.end();
-    } catch(e) { console.error("飞书发送失败"); }
+        const req = https.request(options); req.write(JSON.stringify({ msg_type: "text", content: { text: `【${title}】\n${message}\n时间: ${getBJTime()}` } })); req.end();
+    } catch(e) {}
 }
 
 async function binanceReq(path, params, method = 'POST') {
     return new Promise((resolve) => {
-        try {
-            params.timestamp = Date.now();
-            const query = querystring.stringify(params);
-            const sig = crypto.createHmac('sha256', BINANCE_API_SECRET).update(query).digest('hex');
-            const data = `${query}&signature=${sig}`;
-            const options = { hostname: 'fapi.binance.com', path: method === 'GET' ? `${path}?${data}` : path, method, headers: { 'X-MBX-APIKEY': BINANCE_API_KEY }, timeout: 10000 };
-            const req = https.request(options, res => {
-                let b = ''; res.on('data', c => b += c);
-                res.on('end', () => { try { resolve(JSON.parse(b)); } catch(e) { resolve({code:-999, msg:'JSON Parse Error'}); } });
-            });
-            req.on('error', (e) => resolve({code:-999, msg: e.message})); 
-            if (method === 'POST') req.write(data); req.end();
-        } catch(e) { resolve({code:-999}); }
+        params.timestamp = Date.now();
+        const query = querystring.stringify(params);
+        const sig = crypto.createHmac('sha256', BINANCE_API_SECRET).update(query).digest('hex');
+        const data = `${query}&signature=${sig}`;
+        const options = { hostname: 'fapi.binance.com', path: method === 'GET' ? `${path}?${data}` : path, method, headers: { 'X-MBX-APIKEY': BINANCE_API_KEY }, timeout: 10000 };
+        const req = https.request(options, res => {
+            let b = ''; res.on('data', c => b += c);
+            res.on('end', () => { try { resolve(JSON.parse(b)); } catch(e) { resolve({code:-999}); } });
+        });
+        req.on('error', () => resolve({code:-999})); if (method === 'POST') req.write(data); req.end();
     });
 }
 
-async function fetchKlines(symbol, interval = '15m', limit = 20) {
+async function fetchKlines(symbol) {
     return new Promise((resolve) => {
-        const options = { hostname: 'fapi.binance.com', path: `/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`, timeout: 8000 };
-        https.get(options, res => {
+        https.get(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=15m&limit=20`, res => {
             let d = ''; res.on('data', c => d += c);
-            res.on('end', () => { try { const raw = JSON.parse(d); resolve(Array.isArray(raw) && raw.length >= limit ? raw.map(k => ({ c: +k[4] })) : null); } catch(e) { resolve(null); } });
+            res.on('end', () => { try { const raw = JSON.parse(d); resolve(Array.isArray(raw) ? raw.map(k => ({ c: +k[4] })) : null); } catch(e) { resolve(null); } });
         }).on('error', () => resolve(null));
     });
 }
@@ -81,70 +74,64 @@ function calcRSI(klines) {
     return rsi;
 }
 
+async function setNativeSecurity(symbol, status, entry) {
+    const revSide = status === 'LONG' ? 'SELL' : 'BUY';
+    const slP = (status === 'LONG' ? entry * (1 - SL_HARD/100) : entry * (1 + SL_HARD/100)).toFixed(PRECISION[symbol].p);
+    const tpP = (status === 'LONG' ? entry * (1 + TP_FIXED/100) : entry * (1 - TP_FIXED/100)).toFixed(PRECISION[symbol].p);
+    
+    const slRes = await binanceReq('/fapi/v1/order', { symbol, side: revSide, type: 'STOP_MARKET', stopPrice: slP, closePosition: 'true' });
+    let tpRes = {code: 0};
+    if(activePos.mode === 'NORMAL') {
+        tpRes = await binanceReq('/fapi/v1/order', { symbol, side: revSide, type: 'TAKE_PROFIT_MARKET', stopPrice: tpP, closePosition: 'true' });
+    }
+    
+    if(slRes.code || tpRes.code) {
+        console.error(`❌ [${symbol}] 防线挂载失败! SL:${slRes.msg} TP:${tpRes.msg}`);
+        return false;
+    }
+    console.log(`🛡️ [${symbol}] 原生双保险(止盈+止损)已死死焊在仓位上！`);
+    return true;
+}
+
 async function runMonitor() {
     if (isProcessing) return; isProcessing = true;
     try {
         const risk = await binanceReq('/fapi/v2/positionRisk', {}, 'GET');
         const wallet = await binanceReq('/fapi/v2/account', {}, 'GET');
-        if(!wallet || !wallet.totalMarginBalance) throw new Error("API未返回余额");
-        
+        if(!wallet.totalMarginBalance) return;
         currentBalance = parseFloat(wallet.totalMarginBalance);
-        if(initialBalance === null) {
-            initialBalance = currentBalance;
-            sendFeishu("🚀 战车已上线", `初始资金核实完毕，当前总兵力: ${currentBalance.toFixed(3)} U\n已进入全域扫描模式。`);
-        }
 
-        let hasLivePos = false;
-        if(Array.isArray(risk)) {
-            const p = risk.find(x => Math.abs(parseFloat(x.positionAmt)) > 0);
-            if(p) {
-                hasLivePos = true;
-                activePos.symbol = p.symbol;
-                activePos.status = parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT';
-                activePos.qty = Math.abs(parseFloat(p.positionAmt));
-                activePos.entryPrice = parseFloat(p.entryPrice);
-                if(activePos.startTime === 0) activePos.startTime = Date.now();
-            } else {
-                if(activePos.symbol !== 'NONE') {
-                    await binanceReq('/fapi/v1/allOpenOrders', { symbol: activePos.symbol }, 'DELETE');
-                    sendFeishu("🏁 战斗结束", `[${activePos.symbol}] 仓位已平，残留挂单已全部清除。\n当前余额: ${currentBalance.toFixed(3)} U`);
-                    activePos = { symbol: 'NONE', status: 'NONE', entryPrice: 0, qty: 0, maxMfe: 0, startTime: 0, mode: 'NORMAL' };
-                }
-            }
-        }
-
-        const btcK = await fetchKlines('BTCUSDT', '15m', 5);
-        if(!btcK) throw new Error("大饼数据获取失败");
-        const btcChange = ((btcK[btcK.length-1].c - btcK[btcK.length-2].c) / btcK[btcK.length-2].c) * 100;
+        const pos = Array.isArray(risk) ? risk.find(x => Math.abs(parseFloat(x.positionAmt)) > 0) : null;
+        const btcK = await fetchKlines('BTCUSDT');
+        const btcChange = btcK ? ((btcK[btcK.length-1].c - btcK[btcK.length-2].c) / btcK[btcK.length-2].c) * 100 : 0;
         
-        const hb = ['🔴','🟠','🟡','🟢','🔵','🟣'][Math.floor(Math.random()*6)];
-        console.log(`${hb} [${getBJTime()}] 资产:${currentBalance.toFixed(3)}U | 大饼:${btcChange.toFixed(2)}% | 状态:${activePos.symbol==='NONE'?'🔭侦测中':'🛡️实战中'}`);
+        console.log(`${['🔥','💥','🧨'][Math.floor(Math.random()*3)]} [${getBJTime()}] 资产:${currentBalance.toFixed(3)}U | 状态:${pos?'⚔️血战中':'🔭雷达扫描中'}`);
 
-        if(hasLivePos) {
-            const tick = await binanceReq('/fapi/v1/ticker/price', { symbol: activePos.symbol }, 'GET');
-            if(!tick.price) return;
-            let pnl = activePos.status === 'LONG' ? (tick.price - activePos.entryPrice) / activePos.entryPrice * 100 : (activePos.entryPrice - tick.price) / activePos.entryPrice * 100;
-            if(pnl > activePos.maxMfe) activePos.maxMfe = pnl;
-            
-            if((Date.now() - activePos.startTime) / 3600000 >= MAX_HOLD_HOURS) {
-                console.log(`\n⏰ [${activePos.symbol}] 持仓满${MAX_HOLD_HOURS}小时，强制平仓！`);
-                await binanceReq('/fapi/v1/order', { symbol: activePos.symbol, side: activePos.status==='LONG'?'SELL':'BUY', type: 'MARKET', quantity: activePos.qty });
-                sendFeishu("⏰ 僵尸单强制清理", `[${activePos.symbol}] 持仓超过6小时，已执行强制撤离！`);
-            }
-            if(activePos.mode === 'TRALLING' && activePos.maxMfe > 1.5 && (activePos.maxMfe - pnl) >= 0.5) {
-                console.log(`\n🌪️ [${activePos.symbol}] 顺风利润回撤，触发止盈！`);
-                await binanceReq('/fapi/v1/order', { symbol: activePos.symbol, side: activePos.status==='LONG'?'SELL':'BUY', type: 'MARKET', quantity: activePos.qty });
-                sendFeishu("🌪️ 顺风止盈触发", `[${activePos.symbol}] 动态追踪判定趋势回撤，已市价止盈落袋！`);
+        if(pos) {
+            activePos.symbol = pos.symbol;
+            activePos.status = parseFloat(pos.positionAmt) > 0 ? 'LONG' : 'SHORT';
+            activePos.qty = Math.abs(parseFloat(pos.positionAmt));
+            activePos.entryPrice = parseFloat(pos.entryPrice);
+            if(activePos.startTime === 0) activePos.startTime = Date.now();
+
+            const orders = await binanceReq('/fapi/v1/openOrders', { symbol: pos.symbol }, 'GET');
+            const hasSL = Array.isArray(orders) && orders.some(o => o.type === 'STOP_MARKET');
+            if(!hasSL) {
+                console.log(`⚠️ 警报: 发现裸奔仓位！正在强制注入装甲...`);
+                await setNativeSecurity(pos.symbol, activePos.status, activePos.entryPrice);
             }
             return;
+        } else if(activePos.symbol !== 'NONE') {
+            await binanceReq('/fapi/v1/allOpenOrders', { symbol: activePos.symbol }, 'DELETE');
+            activePos = { symbol: 'NONE', startTime: 0 };
         }
 
         for(const sym of SYMBOLS) {
-            await new Promise(r => setTimeout(r, 400));
-            const klines = await fetchKlines(sym, '15m', 30);
-            if(!klines) continue;
-            const rsi = calcRSI(klines);
-            const liveC = klines[klines.length-1].c;
+            await new Promise(r => setTimeout(r, 300));
+            const k = await fetchKlines(sym);
+            if(!k) continue;
+            const rsi = calcRSI(k);
+            const liveC = k[k.length-1].c;
 
             if(rsi < 30 && !(Math.abs(btcChange) >= BTC_STORM && btcChange < 0)) {
                 await executeTrade(sym, 'BUY', liveC, (Math.abs(btcChange) >= BTC_STORM && btcChange > 0) ? 'TRALLING' : 'NORMAL');
@@ -155,52 +142,40 @@ async function runMonitor() {
                 break;
             }
         }
-    } catch(e) { } finally { isProcessing = false; }
+    } finally { isProcessing = false; }
 }
 
 async function executeTrade(symbol, side, price, mode) {
+    // 强制锁死 10倍 杠杆
     await binanceReq('/fapi/v1/leverage', { symbol: symbol, leverage: LEVERAGE }, 'POST');
     
-    const qty = (TARGET_NOTIONAL / price).toFixed(PRECISION[symbol].q);
-    console.log(`\n⚔️ [${symbol}] 战机出现！发送 ${side} 市价单...`);
+    // 🚀 核心修复：真实火力计算！
+    // 名义总价值 = 你的总余额 * 动用比例(50%) * 杠杆(10x)
+    let notional = currentBalance * POSITION_RISK_PERCENT * LEVERAGE;
+    if (notional < 6) notional = 6.5; // 保底兜底，防止因为各种损耗跌破 5U 门槛
     
+    const qty = (notional / price).toFixed(PRECISION[symbol].q);
+    
+    console.log(`🚀 发起重火力突击 [${symbol}]！动用保证金: ~${(notional/LEVERAGE).toFixed(2)} U...`);
     const res = await binanceReq('/fapi/v1/order', { symbol, side, type: 'MARKET', quantity: qty });
     
     if(res && res.code === undefined) {
-        console.log(`✅ [${symbol}] 阵地已占领！部署防线...`);
-        activePos = { symbol, status: side==='BUY'?'LONG':'SHORT', entryPrice: price, qty: parseFloat(qty), maxMfe: 0, startTime: Date.now(), mode };
+        activePos = { symbol, status: side==='BUY'?'LONG':'SHORT', entryPrice: price, qty: parseFloat(qty), startTime: Date.now(), mode };
+        sendFeishu("🔥 重火力开仓成功", `标的: ${symbol}\n方向: ${side}\n投入保证金: ~${(notional/LEVERAGE).toFixed(2)} U\n系统正在绑定原生防线...`);
         
-        sendFeishu("🔥 战车开火", `标的: ${symbol}\n方向: ${side}\n模式: ${mode==='TRALLING'?'单边大风🌪️':'常规震荡🐒'}\n动用资金: ~$6.5U`);
-
         setTimeout(async () => {
             const risk = await binanceReq('/fapi/v2/positionRisk', {symbol: symbol}, 'GET');
             const exactEntry = (Array.isArray(risk) && risk.length > 0) ? parseFloat(risk[0].entryPrice) : price;
-            
-            const slP = (side === 'BUY' ? exactEntry * (1 - SL_HARD/100) : exactEntry * (1 + SL_HARD/100)).toFixed(PRECISION[symbol].p);
-            const revS = side === 'BUY' ? 'SELL' : 'BUY';
-            
-            await binanceReq('/fapi/v1/order', { symbol, side: revS, type: 'STOP_MARKET', stopPrice: slP, closePosition: 'true' });
-            
-            if(mode === 'NORMAL') {
-                const tpP = (side === 'BUY' ? exactEntry * (1 + TP_FIXED/100) : exactEntry * (1 - TP_FIXED/100)).toFixed(PRECISION[symbol].p);
-                await binanceReq('/fapi/v1/order', { symbol, side: revS, type: 'LIMIT', price: tpP, quantity: activePos.qty, timeInForce: 'GTC' });
-            }
+            await setNativeSecurity(symbol, activePos.status, exactEntry);
         }, 2000);
     } else {
-        console.error(`\n❌ [${symbol}] 开仓阻截。原因: ${res.msg}`);
-        sendFeishu("❌ 开火失败", `标的: ${symbol}\n拦截原因: ${res.msg}\n战车已自动取消本次攻击。`);
+        console.error(`❌ 开火阻截: ${res.msg}`);
     }
 }
 
-// 📡 每小时平安播报
-setInterval(() => {
-    let stat = activePos.symbol === 'NONE' ? "🔭 正在多币种全域巡航" : `🛡️ 正在持仓: ${activePos.symbol}`;
-    sendFeishu("📊 整点平安汇总", `当前资产: ${currentBalance.toFixed(3)} U\n运行状态: ${stat}\n市场大风判定: ${BTC_STORM}%`);
-}, 3600000);
-
 http.createServer((req,res)=>{ 
     res.setHeader('Content-Type','text/html; charset=utf-8'); 
-    res.end(`<h1>V22.1 主宰版正在运行</h1><p>资产: ${currentBalance.toFixed(3)} U</p>`); 
+    res.end(`<h1>V25.0 重火力版运行中</h1><p>已解除资金限制</p>`); 
 }).listen(process.env.PORT||3000);
 
 setInterval(runMonitor, 60000); 
