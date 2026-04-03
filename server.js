@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const querystring = require('querystring');
 
 // ==========================================
-// 🔐 V21.0 逻辑闭环版 (彻底杜绝幽灵单 & 精准校对)
+// 🔐 V21.1 实时心跳版 (彻底解决日志延迟)
 // ==========================================
 const FEISHU_WEBHOOK_URL = process.env.FEISHU_WEBHOOK || "https://open.feishu.cn/open-apis/bot/v2/hook/6099f609-41c4-4364-b0d8-fdb986b821a2"; 
 const BINANCE_API_KEY = process.env.BINANCE_API_KEY;
@@ -14,10 +14,9 @@ const PRECISION = {
     'SOLUSDT': {p:3, q:1}, 'DOGEUSDT': {p:5, q:0}, 'ORDIUSDT': {p:3, q:1}, 
     'INJUSDT': {p:3, q:1}, 'PEPEUSDT': {p:8, q:0}, 'WIFUSDT': {p:4, q:1},
     'BONKUSDT': {p:8, q:0}, '1000SATSUSDT': {p:7, q:0}, 'ARBUSDT': {p:4, q:1}, 
-    'TIAUSDT': {p:3, q:1} // 🎯 确定的 TIA 精度：3位价，1位量
+    'TIAUSDT': {p:3, q:1}
 };
 const SYMBOLS = Object.keys(PRECISION);
-
 const LEVERAGE = 10; 
 const POSITION_RISK_PERCENT = 0.45; 
 const MAX_HOLD_HOURS = 6; 
@@ -98,7 +97,11 @@ async function runMonitor() {
         const btcK = await fetchKlines('BTCUSDT', '15m', 5);
         if(!btcK) return;
         const btcChange = ((btcK[btcK.length-1].c - btcK[btcK.length-2].c) / btcK[btcK.length-2].c) * 100;
-        process.stdout.write(`\r[${getBJTime()}] 💰余额:${currentBalance.toFixed(2)} | 大饼:${btcChange.toFixed(2)}% | 状态:${activePos.symbol==='NONE'?'🔭巡航':'🛡️持仓'}`);
+        
+        // 🎯 修复点：改用 console.log 彻底杜绝日志延迟
+        const heartbeats = ['💓', '💙', '💚', '💛', '💜'];
+        const hb = heartbeats[Math.floor(Math.random() * heartbeats.length)];
+        console.log(`${hb} [${getBJTime()}] 余额:${currentBalance.toFixed(3)} | 大饼:${btcChange.toFixed(2)}% | 状态:${activePos.symbol==='NONE'?'🔭巡航':'🛡️持仓'}`);
 
         if(hasLivePos) {
             const tick = await binanceReq('/fapi/v1/ticker/price', { symbol: activePos.symbol }, 'GET');
@@ -138,34 +141,28 @@ async function openOrder(symbol, side, price, mode) {
     let qty = ((budget * LEVERAGE) / price).toFixed(PRECISION[symbol].q);
     if (parseFloat(qty) * price < 5.5) qty = (6.1 / price).toFixed(PRECISION[symbol].q);
     
-    console.log(`\n🎯 [${symbol}] 尝试开仓... 价格:${price.toFixed(PRECISION[symbol].p)} 数量:${qty}`);
+    console.log(`🚀 [${symbol}] 触发开仓信号! 价格:${price.toFixed(PRECISION[symbol].p)} 数量:${qty}`);
     const res = await binanceReq('/fapi/v1/order', { symbol, side, type: 'MARKET', quantity: qty });
     
-    // 🎯 核心逻辑：只有 Market 单成交了（没有 res.code），才准许挂后面的单子！
     if(res && !res.code) {
-        console.log(`✅ [${symbol}] 开仓成功，开始布置防线...`);
+        console.log(`✅ [${symbol}] 开仓成功，布置止盈止损...`);
         activePos = { symbol, status: side==='BUY'?'LONG':'SHORT', entryPrice: price, qty: parseFloat(qty), maxMfe: 0, startTime: Date.now(), mode };
         setTimeout(async () => {
             const entry = activePos.entryPrice;
             const slP = (side === 'BUY' ? entry * (1 - SL_HARD/100) : entry * (1 + SL_HARD/100)).toFixed(PRECISION[symbol].p);
             const revS = side === 'BUY' ? 'SELL' : 'BUY';
-            // 挂硬止损
             await binanceReq('/fapi/v1/order', { symbol, side: revS, type: 'STOP_MARKET', stopPrice: slP, closePosition: 'true' });
-            // 挂止盈
             if(mode === 'NORMAL') {
                 const tpP = (side === 'BUY' ? entry * (1 + TP_FIXED/100) : entry * (1 - TP_FIXED/100)).toFixed(PRECISION[symbol].p);
                 await binanceReq('/fapi/v1/order', { symbol, side: revS, type: 'LIMIT', price: tpP, quantity: activePos.qty, timeInForce: 'GTC' });
             }
         }, 2000);
-    } else {
-        // 🚨 如果 Market 单报错（比如精度问题），这里会直接拦截，不会再去挂幽灵止盈单！
-        console.error(`\n❌ [${symbol}] 开仓失败，已自动拦截幽灵挂单！原因: ${res.msg || '未知错误'}`);
     }
 }
 
 http.createServer((req,res)=>{ 
     res.setHeader('Content-Type','text/html; charset=utf-8'); 
-    res.end(`<h1>V21.0 闭环版</h1><p>资产: ${currentBalance.toFixed(2)} U</p>`); 
+    res.end(`<h1>V21.1 实时心跳版</h1><p>余额: ${currentBalance.toFixed(3)} U</p>`); 
 }).listen(process.env.PORT||3000);
 
 setInterval(runMonitor, 60000); 
