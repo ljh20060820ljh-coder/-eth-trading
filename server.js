@@ -3,11 +3,11 @@ const http = require('http');
 const crypto = require('crypto');
 const querystring = require('querystring');
 
-process.on('uncaughtException', (err) => { console.error('🔥 [护盾] 拦截异常:', err.message); });
-process.on('unhandledRejection', (reason) => { console.error('🔥 [护盾] 拦截Promise:', reason); });
+process.on('uncaughtException', (err) => { console.error('🔥 [护盾] 异常:', err.message); });
+process.on('unhandledRejection', (reason) => { console.error('🔥 [护盾] 拒绝:', reason); });
 
 // ==========================================
-// 🔐 V32.0 宏观天眼版 (1小时大饼趋势拦截 + 结构防守)
+// 🔐 V38.0 绝对反指之王 (原汁原味触发，100%反向开仓)
 // ==========================================
 const FEISHU_WEBHOOK_URL = process.env.FEISHU_WEBHOOK || "https://open.feishu.cn/open-apis/bot/v2/hook/6099f609-41c4-4364-b0d8-fdb986b821a2"; 
 const BINANCE_API_KEY = process.env.BINANCE_API_KEY;
@@ -19,13 +19,16 @@ let precisions = {};
 const LEVERAGE = 10;                
 const POSITION_RISK_PERCENT = 0.5;  
 
-// 🎯 全新宏观风控：1小时级别的趋势判断
-const MACRO_STORM_UP = 1.2;    // 大饼 1小时 涨超 1.2%，禁止任何做空！
-const MACRO_STORM_DOWN = -1.2; // 大饼 1小时 跌超 1.2%，禁止任何做多！
+const MOMENTUM_CHECK_MINUTES = 30; 
+const MOMENTUM_MIN_PROFIT = 0.01;  
+const PROTECT_PROFIT_TRIGGER = 0.01; 
+const PROTECT_PROFIT_RETRACEMENT = 0.003; 
 
+const MACRO_STORM_UP = 1.2;    
+const MACRO_STORM_DOWN = -1.2; 
 const RSI_BUY_LINE = 30;  
 const RSI_SELL_LINE = 70; 
-const BOUNCE_CONFIRM = 0.005; 
+const BOUNCE_CONFIRM = 0.005; // 经典的 0.5% 反弹确认
 
 const RR_RATIO = 1.5;         
 const MIN_SL_PERCENT = 0.008; 
@@ -33,7 +36,7 @@ const MAX_SL_PERCENT = 0.035;
 const EXTREMUM_BUFFER = 0.002; 
 
 let isProcessing = false; 
-let activePos = { symbol: 'NONE', status: 'NONE', entryPrice: 0, qty: 0, extremum: null, startTime: 0, mode: 'NORMAL' };
+let activePos = { symbol: 'NONE', status: 'NONE', entryPrice: 0, qty: 0, extremum: null, startTime: 0, maxPnl: 0, mode: 'NORMAL' };
 let currentBalance = 0;
 
 function getBJTime() { return new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }); }
@@ -64,7 +67,6 @@ async function binanceReq(path, params, method = 'POST') {
 }
 
 async function initPrecisions() {
-    console.log("🔄 正在同步精度...");
     const data = await binanceReq('/fapi/v1/exchangeInfo', {}, 'GET');
     if(data && Array.isArray(data.symbols)) {
         data.symbols.forEach(s => {
@@ -75,7 +77,7 @@ async function initPrecisions() {
                 precisions[s.symbol] = { p: getDecimals(priceFilter.tickSize), q: getDecimals(lotFilter.stepSize) };
             }
         });
-        sendFeishu("🚀 战车已进化 (V32.0)", "宏观天眼已开启！\n从此大涨绝不摸顶，大跌绝不接刀。");
+        sendFeishu("🚀 终极反指系统上线 (V38.0)", "既然这套算法稳定亏损，那它就是神！\n系统已恢复经典亏损触发条件，并在下单瞬间强制 100% 镜像反向开仓！");
     }
 }
 
@@ -103,36 +105,26 @@ function calcRSI(klines) {
 async function setAlgoSecurity(symbol, status, entry) {
     if(!precisions[symbol]) return false;
     const revSide = status === 'LONG' ? 'SELL' : 'BUY';
-    
-    let slP, tpP, riskPercent;
+    let slP, tpP;
     const ext = activePos.extremum;
-
+    
+    // 防线自动适配反向订单
     if (ext) {
         if (status === 'LONG') {
-            let sl = ext * (1 - EXTREMUM_BUFFER); 
-            riskPercent = (entry - sl) / entry;
-            if (riskPercent < MIN_SL_PERCENT) { sl = entry * (1 - MIN_SL_PERCENT); riskPercent = MIN_SL_PERCENT; }
-            if (riskPercent > MAX_SL_PERCENT) { sl = entry * (1 - MAX_SL_PERCENT); riskPercent = MAX_SL_PERCENT; }
+            let sl = Math.max(ext * (1 - EXTREMUM_BUFFER), entry * (1 - MAX_SL_PERCENT));
             let tp = entry + (entry - sl) * RR_RATIO;
             slP = sl.toFixed(precisions[symbol].p); tpP = tp.toFixed(precisions[symbol].p);
         } else {
-            let sl = ext * (1 + EXTREMUM_BUFFER); 
-            riskPercent = (sl - entry) / entry;
-            if (riskPercent < MIN_SL_PERCENT) { sl = entry * (1 + MIN_SL_PERCENT); riskPercent = MIN_SL_PERCENT; }
-            if (riskPercent > MAX_SL_PERCENT) { sl = entry * (1 + MAX_SL_PERCENT); riskPercent = MAX_SL_PERCENT; }
+            let sl = Math.min(ext * (1 + EXTREMUM_BUFFER), entry * (1 + MAX_SL_PERCENT));
             let tp = entry - (sl - entry) * RR_RATIO;
             slP = sl.toFixed(precisions[symbol].p); tpP = tp.toFixed(precisions[symbol].p);
         }
     } else {
         slP = (status === 'LONG' ? entry * 0.98 : entry * 1.02).toFixed(precisions[symbol].p);
         tpP = (status === 'LONG' ? entry * 1.03 : entry * 0.97).toFixed(precisions[symbol].p);
-        riskPercent = 0.02;
     }
-    
     await binanceReq('/fapi/v1/algoOrder', { algoType: 'CONDITIONAL', symbol: symbol, side: revSide, type: 'STOP_MARKET', triggerPrice: slP, closePosition: 'true' }, 'POST');
-    if(activePos.mode === 'NORMAL') {
-        await binanceReq('/fapi/v1/algoOrder', { algoType: 'CONDITIONAL', symbol: symbol, side: revSide, type: 'TAKE_PROFIT_MARKET', triggerPrice: tpP, closePosition: 'true' }, 'POST');
-    }
+    await binanceReq('/fapi/v1/algoOrder', { algoType: 'CONDITIONAL', symbol: symbol, side: revSide, type: 'TAKE_PROFIT_MARKET', triggerPrice: tpP, closePosition: 'true' }, 'POST');
     return true;
 }
 
@@ -140,21 +132,14 @@ async function runMonitor() {
     if (isProcessing) return; isProcessing = true;
     try {
         if(Object.keys(precisions).length === 0) { await initPrecisions(); if(Object.keys(precisions).length === 0) return; }
-
         const risk = await binanceReq('/fapi/v2/positionRisk', {}, 'GET');
         const wallet = await binanceReq('/fapi/v2/account', {}, 'GET');
         if(!wallet || !wallet.totalMarginBalance) return;
         currentBalance = parseFloat(wallet.totalMarginBalance);
-
         const pos = Array.isArray(risk) ? risk.find(x => Math.abs(parseFloat(x.positionAmt)) > 0) : null;
         
-        // 🧠 核心改造：抓取大饼过去 1小时 (4根K线) 的累计真实涨跌幅！
         const btcK = await fetchKlines('BTCUSDT');
-        const btcMacroChange = (btcK && btcK.length >= 5) 
-            ? ((btcK[btcK.length-1].c - btcK[btcK.length-5].o) / btcK[btcK.length-5].o) * 100 
-            : 0;
-        
-        console.log(`${['🦅','👁️','🔭'][Math.floor(Math.random()*3)]} [${getBJTime()}] 资产: ${currentBalance.toFixed(3)} | 宏观大饼: ${btcMacroChange.toFixed(2)}% | 状态: ${pos?'🔴':'🟢'}`);
+        const btcMacro = (btcK && btcK.length >= 5) ? ((btcK[btcK.length-1].c - btcK[btcK.length-5].o) / btcK[btcK.length-5].o) * 100 : 0;
 
         if(pos) {
             activePos.symbol = pos.symbol;
@@ -163,14 +148,36 @@ async function runMonitor() {
             activePos.entryPrice = parseFloat(pos.entryPrice);
             if(activePos.startTime === 0) activePos.startTime = Date.now();
 
+            const minutesElapsed = (Date.now() - activePos.startTime) / 60000;
+            const currentPrice = parseFloat(pos.markPrice);
+            const pnlPercent = activePos.status === 'LONG' 
+                ? (currentPrice - activePos.entryPrice) / activePos.entryPrice 
+                : (activePos.entryPrice - currentPrice) / activePos.entryPrice;
+
+            if (!activePos.maxPnl) activePos.maxPnl = 0;
+            if (pnlPercent > activePos.maxPnl) activePos.maxPnl = pnlPercent;
+
+            if (activePos.maxPnl >= PROTECT_PROFIT_TRIGGER) {
+                if (pnlPercent <= PROTECT_PROFIT_RETRACEMENT) {
+                    sendFeishu("🛡️ 反指系统止盈", `[${pos.symbol}] 果然反向操作就是神！浮盈已达标回落，成功落袋！`);
+                    await binanceReq('/fapi/v1/order', { symbol: pos.symbol, side: activePos.status === 'LONG' ? 'SELL' : 'BUY', type: 'MARKET', quantity: activePos.qty });
+                    return;
+                }
+            } else {
+                if (minutesElapsed >= MOMENTUM_CHECK_MINUTES && pnlPercent < MOMENTUM_MIN_PROFIT) {
+                    sendFeishu("⚡ 反指系统撤军", `[${pos.symbol}] 反向操作也未能起飞，平仓撤退保底！`);
+                    await binanceReq('/fapi/v1/order', { symbol: pos.symbol, side: activePos.status === 'LONG' ? 'SELL' : 'BUY', type: 'MARKET', quantity: activePos.qty });
+                    return;
+                }
+            }
+
             const algoOrders = await binanceReq('/fapi/v1/openAlgoOrders', { symbol: pos.symbol }, 'GET');
-            const hasSL = JSON.stringify(algoOrders).includes('STOP_MARKET');
-            if(!hasSL) { await setAlgoSecurity(pos.symbol, activePos.status, activePos.entryPrice); }
+            if(!JSON.stringify(algoOrders).includes('STOP_MARKET')) { await setAlgoSecurity(pos.symbol, activePos.status, activePos.entryPrice); }
             return;
         } else if(activePos.symbol !== 'NONE') {
             await binanceReq('/fapi/v1/allOpenOrders', { symbol: activePos.symbol }, 'DELETE');
             await binanceReq('/fapi/v1/algoOpenOrders', { symbol: activePos.symbol }, 'DELETE'); 
-            activePos = { symbol: 'NONE', startTime: 0, mode: 'NORMAL', extremum: null };
+            activePos = { symbol: 'NONE', startTime: 0, mode: 'NORMAL', extremum: null, maxPnl: 0 };
         }
 
         for(const sym of SYMBOLS) {
@@ -178,19 +185,27 @@ async function runMonitor() {
             const k = await fetchKlines(sym);
             if(!k) continue;
             const rsi = calcRSI(k);
-            
-            const liveC = k[k.length-1].c;
-            const recentL = Math.min(k[k.length-1].l, k[k.length-2].l); 
-            const recentH = Math.max(k[k.length-1].h, k[k.length-2].h); 
+            const liveC = k[k.length-1].c, recentL = Math.min(k[k.length-1].l, k[k.length-2].l), recentH = Math.max(k[k.length-1].h, k[k.length-2].h); 
 
-            // 🟢 做多：宏观大饼不能暴跌 (不能小于 -1.2%)
-            if(rsi < RSI_BUY_LINE && btcMacroChange > MACRO_STORM_DOWN && liveC >= recentL * (1 + BOUNCE_CONFIRM)) {
-                await executeTrade(sym, 'BUY', liveC, recentL);
+            // ============================================
+            // 😈 核心：原汁原味的亏损触发条件，执行 100% 镜像反向！
+            // ============================================
+            
+            // 曾经的“去抄底必亏”形态：RSI跌破30，且价格刚刚比最低点反弹了 0.5% (自以为跌到底了)
+            // 现在的反转执行：它觉得跌到底了，老子偏觉得这是“假反弹”，直接做空 (SELL)！
+            if(rsi < RSI_BUY_LINE && btcMacro > MACRO_STORM_DOWN && liveC >= recentL * (1 + BOUNCE_CONFIRM)) {
+                console.log(`\n😈 [${sym}] RSI=${rsi.toFixed(2)}，经典假反弹出现！按原计划该去抄底送死了，咱们直接反转做空！`);
+                // 传 recentH 进去，因为做空止损要挂在上面
+                await executeTrade(sym, 'SELL', liveC, recentH); 
                 break;
             }
-            // 🔴 做空：宏观大饼不能暴涨 (不能大于 1.2%)
-            if(rsi > RSI_SELL_LINE && btcMacroChange < MACRO_STORM_UP && liveC <= recentH * (1 - BOUNCE_CONFIRM)) {
-                await executeTrade(sym, 'SELL', liveC, recentH);
+            
+            // 曾经的“去摸顶必亏”形态：RSI冲破70，且价格刚刚比最高点回落了 0.5% (自以为涨到头了)
+            // 现在的反转执行：它觉得涨到头了，老子偏觉得这是“假回落洗盘”，直接做多 (BUY)！
+            if(rsi > RSI_SELL_LINE && btcMacro < MACRO_STORM_UP && liveC <= recentH * (1 - BOUNCE_CONFIRM)) {
+                console.log(`\n😈 [${sym}] RSI=${rsi.toFixed(2)}，经典洗盘出现！按原计划该去摸顶被拉爆了，咱们直接反转做多！`);
+                // 传 recentL 进去，因为做多止损要挂在下面
+                await executeTrade(sym, 'BUY', liveC, recentL); 
                 break;
             }
         }
@@ -200,23 +215,15 @@ async function runMonitor() {
 async function executeTrade(symbol, side, price, extremum) {
     if(!precisions[symbol]) return;
     await binanceReq('/fapi/v1/leverage', { symbol: symbol, leverage: LEVERAGE }, 'POST');
-    
-    let notional = currentBalance * POSITION_RISK_PERCENT * LEVERAGE;
-    if (notional < 6.5) notional = 6.5; 
+    let notional = Math.max(currentBalance * POSITION_RISK_PERCENT * LEVERAGE, 6.5);
     const qty = (notional / price).toFixed(precisions[symbol].q);
-    
     const res = await binanceReq('/fapi/v1/order', { symbol, side, type: 'MARKET', quantity: qty });
-    
     if(res && res.code === undefined) {
-        activePos = { symbol, status: side==='BUY'?'LONG':'SHORT', entryPrice: price, qty: parseFloat(qty), extremum: extremum, startTime: Date.now(), mode: 'NORMAL' };
-        sendFeishu("🔥 顺势开仓", `标的: ${symbol}\n方向: ${side}\n已通过 1小时宏观趋势 过滤！`);
-        setTimeout(async () => {
-            const risk = await binanceReq('/fapi/v2/positionRisk', {symbol: symbol}, 'GET');
-            const exactEntry = (Array.isArray(risk) && risk.length > 0) ? parseFloat(risk[0].entryPrice) : price;
-            await setAlgoSecurity(symbol, activePos.status, exactEntry);
-        }, 2000);
+        activePos = { symbol, status: side==='BUY'?'LONG':'SHORT', entryPrice: price, qty: parseFloat(qty), extremum: extremum, startTime: Date.now(), maxPnl: 0, mode: 'NORMAL' };
+        sendFeishu("🔥 反指之王已开仓", `标的: ${symbol}\n方向: ${side}\n系统触发了原版的死亡抄底/摸顶逻辑，咱们已完美反向操作！`);
+        setTimeout(async () => { await setAlgoSecurity(symbol, activePos.status, price); }, 2000);
     }
 }
 
-http.createServer((req,res)=>{ res.setHeader('Content-Type','text/html; charset=utf-8'); res.end(`<h1>V32.0 宏观天眼版运行中</h1>`); }).listen(process.env.PORT||3000);
+http.createServer((req,res)=>{ res.setHeader('Content-Type','text/html; charset=utf-8'); res.end(`<h1>V38.0 绝对反指之王</h1>`); }).listen(process.env.PORT||3000);
 setInterval(runMonitor, 60000); runMonitor();
