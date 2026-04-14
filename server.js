@@ -6,7 +6,7 @@ const querystring = require('querystring');
 // ==========================================
 // 🖥️ 全局雷达日志系统 (脱离 Render 控制台)
 // ==========================================
-let globalLog = "⏳ 刺客已潜伏，等待首次雷达扫描...";
+let globalLog = "⏳ 刺客 V40.0 已潜伏，等待首次雷达扫描...";
 
 process.on('uncaughtException', (err) => { globalLog = `🔥 [致命异常] ${err.message}`; });
 process.on('unhandledRejection', (reason) => { globalLog = `🔥 [Promise拒绝] ${reason}`; });
@@ -16,36 +16,35 @@ function getBJTime() { return new Date().toLocaleString('zh-CN', { timeZone: 'As
 function updateLog(msg) {
     const t = getBJTime();
     console.log(`[${t}] ${msg}`);
-    // 保留最近 10 条日志在网页上，防止太长卡顿
     const logs = globalLog.split('<br>');
     if (logs.length > 10) logs.pop(); 
     globalLog = `[${t}] ${msg}<br>` + logs.join('<br>');
 }
 
 // ==========================================
-// 🔐 V39.1 量价刺客终极版 (宽幅防守 + 独立大屏)
+// 🔐 V40.0 刺客终极版 (双级别共振 + 趋势过滤)
 // ==========================================
 const FEISHU_WEBHOOK_URL = process.env.FEISHU_WEBHOOK || "https://open.feishu.cn/open-apis/bot/v2/hook/6099f609-41c4-4364-b0d8-fdb986b821a2"; 
 const BINANCE_API_KEY = process.env.BINANCE_API_KEY;
 const BINANCE_API_SECRET = process.env.BINANCE_API_SECRET;
 
-// 🎯 缩小猎物范围：只打流动性好、爱插针的币
 const SYMBOLS = ['SOLUSDT', 'DOGEUSDT', 'PEPEUSDT', 'WIFUSDT', 'ARBUSDT']; 
 let precisions = {}; 
+let lastTradedCandleTime = {}; // 🛑 新增：防重复开仓锁
 
 const LEVERAGE = 10;                
 const POSITION_RISK_PERCENT = 0.5;  
 
-// 🗡️ 主力猎杀参数：异常爆量 + 长插针
-const VOLUME_SPIKE_MULTIPLIER = 2.0; // 成交量必须是均量的 2 倍以上 (爆天量)
-const WICK_BODY_RATIO = 2.0;         // 影线必须是实体的 2 倍以上 (拒收形态)
-const MACRO_STORM_LIMIT = 1.5;       // 大饼 1小时 波动风控
+// 🗡️ 主力猎杀参数
+const VOLUME_SPIKE_MULTIPLIER = 2.0; 
+const WICK_BODY_RATIO = 2.0;         
+const MACRO_STORM_LIMIT = 1.5;       
 
-// 🛡️ 宽幅防守参数 (空间换胜率)
-const RR_RATIO = 2.0;                // 亏1赚2，盈亏比极度拉升
-const EXTREMUM_BUFFER = 0.006;       // 🛡️ 缓冲区加宽至 0.6% (防扫损核心)
-const MIN_SL_PERCENT = 0.008;        // 🛡️ 最小容忍 0.8% 止损
-const MAX_SL_PERCENT = 0.035;        // 🛡️ 极限容忍 3.5% 止损 (预留深踩空间)
+// 🛡️ 防线参数 
+const RR_RATIO = 2.0;                
+const EXTREMUM_BUFFER = 0.006;       
+const MIN_SL_PERCENT = 0.008;        
+const MAX_SL_PERCENT = 0.035;        
 
 let isProcessing = false; 
 let activePos = { symbol: 'NONE', status: 'NONE', entryPrice: 0, qty: 0, extremum: null, startTime: 0, mode: 'NORMAL' };
@@ -83,7 +82,7 @@ async function binanceReq(path, params, method = 'POST') {
 }
 
 async function initPrecisions() {
-    updateLog("🔄 战车重装系统：加载宽幅量价刺客算法...");
+    updateLog("🔄 战车重装系统：加载 V40.0 双级别共振算法...");
     const data = await binanceReq('/fapi/v1/exchangeInfo', {}, 'GET');
     if(data && Array.isArray(data.symbols)) {
         data.symbols.forEach(s => {
@@ -94,29 +93,38 @@ async function initPrecisions() {
                 precisions[s.symbol] = { p: getDecimals(priceFilter.tickSize), q: getDecimals(lotFilter.stepSize) };
             }
         });
-        updateLog("✅ 刺客就位！宽幅防线构建完毕，允许自由开火！");
-        sendFeishu("🚀 V39.1 量价刺客完全体", "底层架构刷新完毕！\n已加宽防扫损缓冲区 (0.6%)，并开启独立雷达监控大屏。");
+        updateLog("✅ 刺客就位！顺势防线构建完毕，允许自由开火！");
+        sendFeishu("🚀 V40.0 刺客完全体", "底层架构刷新完毕！\n已引入 1H EMA20 趋势过滤与收盘确认机制。");
     } else {
         updateLog("❌ API权限错误或网络阻断，无法获取交易精度！");
     }
 }
 
-async function fetchKlines(symbol) {
+// 📈 核心修改：支持动态传参 interval，获取开盘时间 t
+async function fetchKlines(symbol, interval = '15m') {
     return new Promise((resolve) => {
-        https.get(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=15m&limit=20`, res => {
+        https.get(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=25`, res => {
             let d = ''; res.on('data', c => d += c);
             res.on('end', () => { 
                 try { 
                     const raw = JSON.parse(d); 
-                    // 抓取 O, H, L, C 和 Volume (成交量)
-                    resolve(Array.isArray(raw) ? raw.map(k => ({ o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] })) : null); 
+                    resolve(Array.isArray(raw) ? raw.map(k => ({ t: +k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] })) : null); 
                 } catch(e) { resolve(null); } 
             });
         }).on('error', () => resolve(null));
     });
 }
 
-// 🛡️ 宽幅防线设置
+// 📈 核心计算：EMA (指数移动平均线)
+function calculateEMA(closes, period) {
+    let ema = [closes[0]];
+    const multiplier = 2 / (period + 1);
+    for (let i = 1; i < closes.length; i++) {
+        ema.push((closes[i] - ema[i - 1]) * multiplier + ema[i - 1]);
+    }
+    return ema;
+}
+
 async function setAlgoSecurity(symbol, status, entry) {
     if(!precisions[symbol]) return false;
     const revSide = status === 'LONG' ? 'SELL' : 'BUY';
@@ -145,7 +153,7 @@ async function setAlgoSecurity(symbol, status, entry) {
     
     const slDist = (Math.abs(parseFloat(slP) - entry) / entry * 100).toFixed(2);
     updateLog(`🛡️ [${symbol}] 宽幅防线已布防，止损空间: ${slDist}%`);
-    sendFeishu("🔥 开仓防护挂载 (V39.1宽幅版)", `标的: ${symbol}\n方向: ${status}\n止损距离: ${slDist}%\n(已预留 0.6% 针尖防守缓冲区，拒绝轻易被扫损)`);
+    sendFeishu("🔥 开仓防护挂载 (V40.0版)", `标的: ${symbol}\n方向: ${status}\n止损距离: ${slDist}%`);
     return true;
 }
 
@@ -159,16 +167,16 @@ async function runMonitor() {
         const wallet = await binanceReq('/fapi/v2/account', {}, 'GET');
         
         if(!wallet || !wallet.totalMarginBalance) {
-            updateLog(`❌ 资产获取异常，可能因为网络断流或API受限。`);
+            updateLog(`❌ 资产获取异常，可能因API受限。`);
             return;
         }
         currentBalance = parseFloat(wallet.totalMarginBalance);
         const pos = Array.isArray(risk) ? risk.find(x => Math.abs(parseFloat(x.positionAmt)) > 0) : null;
         
-        const btcK = await fetchKlines('BTCUSDT');
+        const btcK = await fetchKlines('BTCUSDT', '15m');
         btcMacroChange = (btcK && btcK.length >= 5) ? ((btcK[btcK.length-1].c - btcK[btcK.length-5].o) / btcK[btcK.length-5].o) * 100 : 0;
 
-        updateLog(`✅ 刺客雷达运行中 | 状态: ${pos?'🔴搏杀中':'🟢隐蔽蹲守'}`);
+        updateLog(`✅ V40.0 雷达运行中 | 状态: ${pos?'🔴搏杀中':'🟢隐蔽蹲守'}`);
 
         if(pos) {
             activePos.symbol = pos.symbol;
@@ -187,41 +195,57 @@ async function runMonitor() {
         }
 
         // ==========================================
-        // 🗡️ 主力猎杀逻辑：寻找异常爆量插针
+        // 🗡️ V40.0 主力猎杀逻辑：收盘确认 + 趋势共振
         // ==========================================
         for(const sym of SYMBOLS) {
             await new Promise(r => setTimeout(r, 300));
-            const k = await fetchKlines(sym);
-            if(!k || k.length < 15) continue;
+            const k15 = await fetchKlines(sym, '15m');
+            const k1H = await fetchKlines(sym, '1h');
+            
+            if(!k15 || k15.length < 20 || !k1H || k1H.length < 25) continue;
+            
+            // 获取已完全收盘的倒数第二根 15m K线
+            const closedCandle15 = k15[k15.length-2]; 
+            
+            // 🛡️ 防御锁：避免同一根 K 线重复开单
+            if(lastTradedCandleTime[sym] === closedCandle15.t) continue;
+            
+            // 🛡️ 计算 1H 级别的 EMA20 作为趋势判别标准
+            const closes1H = k1H.map(k => k.c);
+            const ema20_1H = calculateEMA(closes1H, 20);
+            const currentTrend1H = ema20_1H[ema20_1H.length - 1]; 
             
             let avgVol = 0;
-            for(let i = k.length-11; i < k.length-1; i++) { avgVol += k[i].v; }
+            for(let i = k15.length-12; i < k15.length-2; i++) { avgVol += k15[i].v; }
             avgVol /= 10;
             
-            const current = k[k.length-1];
-            const body = Math.abs(current.c - current.o) || 0.0001; 
-            const upperWick = current.h - Math.max(current.o, current.c);
-            const lowerWick = Math.min(current.o, current.c) - current.l;
+            const body = Math.abs(closedCandle15.c - closedCandle15.o) || 0.0001; 
+            const upperWick = closedCandle15.h - Math.max(closedCandle15.o, closedCandle15.c);
+            const lowerWick = Math.min(closedCandle15.o, closedCandle15.c) - closedCandle15.l;
             
-            // 🟢 主力爆量砸盘，下探后拉起 (探底针 -> 抄底做多)
-            if (current.v > avgVol * VOLUME_SPIKE_MULTIPLIER && 
+            // 🟢 顺势抄底：15分钟爆量探底 + 1小时大趋势向上
+            if (closedCandle15.v > avgVol * VOLUME_SPIKE_MULTIPLIER && 
                 lowerWick > body * WICK_BODY_RATIO && 
                 lowerWick > upperWick * 2 &&
+                closedCandle15.c > currentTrend1H &&
                 btcMacroChange > -MACRO_STORM_LIMIT) {
                 
-                updateLog(`🗡️ [${sym}] 监测到主力爆量插针吸筹！跟进做多！`);
-                await executeTrade(sym, 'BUY', current.c, current.l); 
+                updateLog(`🛡️ [${sym}] 1H顺势 + 15m探底共振确认！刺客做多！`);
+                await executeTrade(sym, 'BUY', closedCandle15.c, closedCandle15.l); 
+                lastTradedCandleTime[sym] = closedCandle15.t;
                 break;
             }
 
-            // 🔴 主力爆量拉升，冲高后被砸 (顶天针 -> 摸顶做空)
-            if (current.v > avgVol * VOLUME_SPIKE_MULTIPLIER && 
+            // 🔴 顺势摸顶：15分钟爆量冲高 + 1小时大趋势向下
+            if (closedCandle15.v > avgVol * VOLUME_SPIKE_MULTIPLIER && 
                 upperWick > body * WICK_BODY_RATIO && 
                 upperWick > lowerWick * 2 &&
+                closedCandle15.c < currentTrend1H &&
                 btcMacroChange < MACRO_STORM_LIMIT) {
                 
-                updateLog(`🗡️ [${sym}] 监测到主力爆量冲高出货！跟进做空！`);
-                await executeTrade(sym, 'SELL', current.c, current.h); 
+                updateLog(`🛡️ [${sym}] 1H空头压制 + 15m摸顶共振确认！刺客做空！`);
+                await executeTrade(sym, 'SELL', closedCandle15.c, closedCandle15.h); 
+                lastTradedCandleTime[sym] = closedCandle15.t;
                 break;
             }
         }
@@ -234,7 +258,6 @@ async function executeTrade(symbol, side, price, extremum) {
     if(!precisions[symbol]) return;
     await binanceReq('/fapi/v1/leverage', { symbol: symbol, leverage: LEVERAGE }, 'POST');
     
-    // 资金保护策略
     let notional = Math.max(currentBalance * POSITION_RISK_PERCENT * LEVERAGE, 6.5);
     if (notional > currentBalance * LEVERAGE) notional = currentBalance * LEVERAGE * 0.9; 
     
@@ -243,8 +266,8 @@ async function executeTrade(symbol, side, price, extremum) {
     
     if(res && res.code === undefined) {
         activePos = { symbol, status: side==='BUY'?'LONG':'SHORT', entryPrice: price, qty: parseFloat(qty), extremum: extremum, startTime: Date.now(), mode: 'NORMAL' };
-        updateLog(`🚀 刺客成功建仓 [${symbol}]，方向: ${side}`);
-        sendFeishu("🔥 主力足迹确认，跟随建仓", `标的: ${symbol}\n方向: ${side}\n极高盈亏比战役开启！`);
+        updateLog(`🚀 成功建仓 [${symbol}]，方向: ${side}`);
+        sendFeishu("🔥 主力顺势足迹确认", `标的: ${symbol}\n方向: ${side}\n极高盈亏比战役开启！`);
         setTimeout(async () => { await setAlgoSecurity(symbol, activePos.status, price); }, 2000);
     } else {
         updateLog(`❌ 开仓受阻: ${res.msg}`);
@@ -252,7 +275,7 @@ async function executeTrade(symbol, side, price, extremum) {
 }
 
 // ==========================================
-// 🖥️ 独立可视化雷达大屏 (随时随地用手机查看)
+// 🖥️ 独立可视化雷达大屏
 // ==========================================
 http.createServer((req, res) => { 
     res.setHeader('Content-Type', 'text/html; charset=utf-8'); 
@@ -261,7 +284,7 @@ http.createServer((req, res) => {
         <html>
         <head>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>V39.1 刺客指挥中心</title>
+            <title>V40.0 刺客指挥中心</title>
             <style>
                 body { font-family: -apple-system, sans-serif; background: #0b0c10; color: #c5c6c7; padding: 20px; line-height: 1.5; }
                 h2 { color: #66fcf1; border-bottom: 1px solid #1f2833; padding-bottom: 10px; }
@@ -272,7 +295,7 @@ http.createServer((req, res) => {
             </style>
         </head>
         <body>
-            <h2>🗡️ V39.1 宽幅量价刺客大屏</h2>
+            <h2>🗡️ V40.0 量价刺客 (顺势版)</h2>
             <div class="panel">
                 <div>💰 <b>当前兵力:</b> <span class="val">${currentBalance.toFixed(3)} U</span></div>
                 <div>📈 <b>宏观环境:</b> <span class="val">${btcMacroChange.toFixed(2)}%</span></div>
@@ -282,7 +305,7 @@ http.createServer((req, res) => {
             <div class="log-box">
                 ${globalLog}
             </div>
-            <div class="tip">💡 提示：按住屏幕下拉刷新即可获取最新战况。<br>刺客策略注重胜率质量而非数量，请保持耐心。</div>
+            <div class="tip">💡 提示：按住屏幕下拉刷新即可获取最新战况。<br>宁可踏空，绝不逆势。此版本开单频率大幅降低，请保持耐心。</div>
         </body>
         </html>
     `); 
